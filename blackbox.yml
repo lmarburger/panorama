@@ -1,0 +1,17 @@
+modules:
+  icmp:
+    prober: icmp
+    timeout: 1s
+    icmp:
+      preferred_ip_protocol: "ip4"
+  tcp:
+    prober: tcp
+    timeout: 1s
+    tcp:
+      preferred_ip_protocol: "ip4"
+  dns:
+    prober: dns
+    timeout: 1s
+    dns:
+      query_name: "www.prometheus.io"
+      query_type: "A"

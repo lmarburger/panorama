@@ -1,0 +1,82 @@
+volumes:
+  grafana:
+  prometheus:
+
+services:
+  surveyor:
+    container_name: surveyor
+    build:
+      context: surveyor
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      - "--addr=:80"
+    expose:
+      - 80
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana-oss
+    restart: unless-stopped
+    volumes:
+      - grafana:/var/lib/grafana
+    ports:
+      - 4242:3000
+
+  prometheus:
+    container_name: prometheus
+    hostname: prometheus
+    image: prom/prometheus
+    restart: unless-stopped
+    volumes:
+      - prometheus:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - "--storage.tsdb.retention.time=730d"
+      - "--storage.tsdb.path=/prometheus/"
+      - "--web.enable-admin-api"
+    ports:
+      - 9090:9090
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # enables host.docker.internal as a dns name
+
+  blackbox:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox
+    restart: unless-stopped
+    volumes:
+      - ./blackbox.yml:/etc/blackbox/blackbox.yml
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+      - --log.level=debug
+    ports:
+      - 9115:9115
+
+  # export basic system metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    expose:
+      - 9100
+
+#  openweather-exporter:
+#    image: billykwooten/openweather-exporter
+#    container_name: openweather-exporter
+#    restart: unless-stopped
+#    environment:
+#      - OW_CITY=Linglestown, PA, US
+#      - OW_APIKEY=${OPENWEATHER_API_KEY}
+#      - OW_ENABLE_POL=false
+#      - OW_ENABLE_UV=false

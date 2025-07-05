@@ -1,0 +1,69 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'surveyor'
+    static_configs:
+      - targets: ['surveyor']
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'icmp'
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    static_configs:
+      - targets:
+          - 8.8.8.8
+          - 8.8.4.4
+          - 1.1.1.1
+          - 1.0.0.1
+          - 192.168.119.1
+          - 192.168.100.1
+          - 50.234.106.9
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: 'tcp'
+    metrics_path: /probe
+    params:
+      module: [tcp]
+    static_configs:
+      - targets:
+          - 8.8.8.8:53
+          - 8.8.4.4:53
+          - 1.1.1.1:53
+          - 1.0.0.1:53
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: 'dns'
+    metrics_path: /probe
+    params:
+      module: [dns]
+    static_configs:
+      - targets:
+          - 8.8.8.8
+          - 8.8.4.4
+          - 1.1.1.1
+          - 1.0.0.1
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
