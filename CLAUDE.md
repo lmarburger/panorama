@@ -89,7 +89,7 @@ staticcheck ./...
 ## Service Ports
 
 - Grafana: http://localhost:4242
-- Prometheus: http://localhost:9090
+- Prometheus: http://localhost:9099
 - Blackbox Exporter: http://localhost:9115
 - Surveyor: Internal (exposed to Prometheus only)
 - Geodesist: Internal (exposed to Prometheus only)

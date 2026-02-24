@@ -52,7 +52,7 @@ services:
       - "--storage.tsdb.path=/prometheus/"
       - "--web.enable-admin-api"
     ports:
-      - 9090:9090
+      - 9099:9090
     extra_hosts:
       - "host.docker.internal:host-gateway" # enables host.docker.internal as a dns name
 
