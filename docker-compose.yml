@@ -51,8 +51,8 @@ services:
       - "--storage.tsdb.retention.time=730d"
       - "--storage.tsdb.path=/prometheus/"
       - "--web.enable-admin-api"
-    ports:
-      - 9099:9090
+    expose:
+      - 9090
     extra_hosts:
       - "host.docker.internal:host-gateway" # enables host.docker.internal as a dns name
 
@@ -65,8 +65,8 @@ services:
     command:
       - --config.file=/etc/blackbox/blackbox.yml
       - --log.level=debug
-    ports:
-      - 9115:9115
+    expose:
+      - 9115
 
   # export basic system metrics
   node-exporter:
