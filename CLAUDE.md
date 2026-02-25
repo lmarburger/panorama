@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Panorama is a comprehensive network monitoring stack that combines cable modem signal quality monitoring with traditional network metrics. It consists of:
 
 - **Surveyor**: Custom Prometheus exporter for Surfboard cable modem signal statistics (SNR, power levels, error counts)
-- **Full monitoring stack**: Prometheus (2-year retention), Grafana (port 4242), Blackbox exporter, and Node exporter
+- **Full monitoring stack**: Prometheus (2-year retention), Grafana (port 4242), Blackbox exporter, and Node exporter (Docker VM + native macOS)
 - **Docker Compose orchestration**: Easy deployment of the entire monitoring infrastructure
 
 The goal is to complement network latency graphs (like Smokeping) with physical layer signal metrics to diagnose whether network issues are due to cable conditions or other factors.
@@ -93,7 +93,8 @@ staticcheck ./...
 - Blackbox Exporter: http://localhost:9115
 - Surveyor: Internal (exposed to Prometheus only)
 - Geodesist: Internal (exposed to Prometheus only)
-- Node Exporter: Internal (port 9100)
+- Node Exporter (Docker VM): Internal (port 9100, job `node`)
+- Node Exporter (macOS host): http://localhost:9100 (native Homebrew install, job `macos`)
 
 ## Key Technical Details
 
