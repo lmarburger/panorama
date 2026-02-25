@@ -96,6 +96,31 @@ staticcheck ./...
 - Node Exporter (Docker VM): Internal (port 9100, job `node`)
 - Node Exporter (macOS host): http://localhost:9100 (native Homebrew install, job `macos`)
 
+## Grafana API
+
+Grafana dashboards can be read and updated directly via the API. Use this instead of exporting/importing JSON files.
+
+- **Base URL**: `http://localhost:4242`
+- **Auth**: Basic auth `admin:admin`
+
+```bash
+# Get a dashboard by UID
+curl -s -u admin:admin http://localhost:4242/api/dashboards/uid/<uid>
+
+# Save/update a dashboard (overwrite: true to update existing)
+curl -s -u admin:admin -X POST http://localhost:4242/api/dashboards/db \
+  -H 'Content-Type: application/json' \
+  -d '{"dashboard": <dashboard_json>, "overwrite": true}'
+```
+
+When updating a dashboard, fetch it first to get the current `version`, then include the full dashboard object in the save payload. The `id` field inside the dashboard object identifies it; set `overwrite: true` to replace.
+
+### Known Dashboards
+
+| Name | UID |
+|------|-----|
+| System | `ad9scbj` |
+
 ## Key Technical Details
 
 1. **HNAP Authentication**: Uses HMAC-MD5 with specific header requirements for secure modem communication
