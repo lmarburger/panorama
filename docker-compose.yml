@@ -52,7 +52,7 @@ services:
       # Grafana nags about the default password until it is changed. This only
       # takes effect when the volume is first created; on an existing volume the
       # password must be changed through the API or the UI.
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-smokeping}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-panorama}
     volumes:
       - grafana:/var/lib/grafana
     ports:

@@ -144,7 +144,7 @@ Both embed Python inside single-quoted shell strings, so **the embedded Python m
 
 ### Grafana Auth
 
-Basic auth `admin:smokeping`. `scripts/grafana` sources `.env` and honors `GRAFANA_ADMIN_PASSWORD`, falling back to `smokeping`. Override the endpoint or credential with `GRAFANA_URL` / `GRAFANA_AUTH`.
+Basic auth `admin:panorama`. `scripts/grafana` sources `.env` and honors `GRAFANA_ADMIN_PASSWORD`, falling back to `panorama`. Override the endpoint or credential with `GRAFANA_URL` / `GRAFANA_AUTH`.
 
 `GF_SECURITY_ADMIN_PASSWORD` in `docker-compose.yml` **only applies when the `grafana` volume is first created** (verified empirically). To change the password on an existing volume:
 
@@ -153,7 +153,9 @@ scripts/grafana api /api/admin/users/1/password \
   -X PUT -H 'Content-Type: application/json' -d '{"password":"<new>"}'
 ```
 
-Grafana shows an "update your password" prompt while the admin password is literally `admin`. There is no config option to suppress it; the only fix is to use a different password.
+Grafana shows an "update your password" prompt while the admin password is literally `admin`. There is no config option to suppress it; the only fix is to use a different password. The compose default is `panorama` rather than unset precisely so a fresh clone comes up already past that prompt.
+
+The credential is in a public repo on purpose. Grafana is bound to loopback and one LAN address, so reaching it means already being on the home network. The residual risk is joining another network that also uses AmpliFi's default `192.168.119.0/24` range and being handed `.4`, which would activate the LAN binding there.
 
 ### Known Dashboards
 
@@ -181,7 +183,7 @@ Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom
 |----------|---------|---------|
 | `AMPLIFI_PASSWORD` | none, required | geodesist router login |
 | `AMPLIFI_ROUTER_ADDR` | `http://192.168.119.1` | router URL |
-| `GRAFANA_ADMIN_PASSWORD` | `smokeping` | admin password; also read by `scripts/grafana` |
+| `GRAFANA_ADMIN_PASSWORD` | `panorama` | admin password; also read by `scripts/grafana` |
 | `GRAFANA_LAN_IP` | `192.168.119.4` | the LAN address Grafana binds to |
 
 ## Gotchas

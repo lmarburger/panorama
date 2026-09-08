@@ -22,7 +22,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:4242}"
-GRAFANA_AUTH="${GRAFANA_AUTH:-admin:${GRAFANA_ADMIN_PASSWORD:-smokeping}}"
+GRAFANA_AUTH="${GRAFANA_AUTH:-admin:${GRAFANA_ADMIN_PASSWORD:-panorama}}"
 
 die() { printf 'grafana: %s\n' "$*" >&2; exit 1; }
 
