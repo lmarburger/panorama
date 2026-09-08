@@ -30,17 +30,28 @@ services:
 
   grafana:
     container_name: grafana
-    image: grafana/grafana-oss
+    image: grafana/grafana-oss:13.0.2
     restart: unless-stopped
+    environment:
+      # Grafana nags about the default password until it is changed. This only
+      # takes effect when the volume is first created; on an existing volume the
+      # password must be changed through the API or the UI.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-smokeping}
     volumes:
       - grafana:/var/lib/grafana
     ports:
-      - 4242:3000
+      # Bound to loopback plus the Mac's static LAN lease rather than 0.0.0.0, so
+      # Grafana is unreachable from any other network the laptop joins. OrbStack
+      # accepts a binding for an address the host does not currently hold, so off
+      # the home LAN the container still starts and stays reachable on loopback;
+      # the LAN address simply serves nothing until the Mac is home again.
+      - "127.0.0.1:4242:3000"
+      - "${GRAFANA_LAN_IP:-192.168.119.4}:4242:3000"
 
   prometheus:
     container_name: prometheus
     hostname: prometheus
-    image: prom/prometheus
+    image: prom/prometheus:v3.14.0
     restart: unless-stopped
     volumes:
       - prometheus:/prometheus
@@ -57,7 +68,7 @@ services:
       - "host.docker.internal:host-gateway" # enables host.docker.internal as a dns name
 
   blackbox:
-    image: prom/blackbox-exporter:latest
+    image: prom/blackbox-exporter:v0.28.0
     container_name: blackbox
     restart: unless-stopped
     volumes:
@@ -70,7 +81,7 @@ services:
 
   # export basic system metrics
   node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.12.1
     container_name: node-exporter
     restart: unless-stopped
     volumes:
