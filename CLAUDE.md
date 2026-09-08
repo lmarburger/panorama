@@ -15,15 +15,18 @@ The goal is to complement network latency graphs (like Smokeping) with physical 
 ## Architecture
 
 ### Component Structure
-- `/surveyor/`: Go-based Prometheus exporter for cable modem metrics
+
+In this repo:
+- `prometheus/`: Prometheus configuration and alert rules
+- `blackbox.yml`: Blackbox exporter configuration for network probing
+- `docker-compose.yml`: Main orchestration file for the full stack
+- `scripts/`: helper scripts (see below); use these rather than raw `curl`
+
+In sibling repos (see Repository Layout):
+- `../surveyor/`: Go-based Prometheus exporter for cable modem metrics
   - Uses HNAP (Home Network Administration Protocol) with HMAC-MD5 authentication
   - Targets Surfboard SB6141 modem at `https://192.168.100.1/HNAP1/`
-  - Exposes metrics at `/metrics` endpoint
-- `/geodesist/`: Go-based Prometheus exporter for AmpliFi wifi usage metrics
-  - Exposes metrics at `/metrics` endpoint
-- `/prometheus/`: Prometheus configuration and alert rules
-- `/blackbox.yml`: Blackbox exporter configuration for network probing
-- `/docker-compose.yml`: Main orchestration file for the full stack
+- `../geodesist/`: Go-based Prometheus exporter for AmpliFi wifi usage metrics
 
 ### Surveyor Architecture
 The surveyor codebase follows clean Go architecture:
@@ -34,55 +37,37 @@ The surveyor codebase follows clean Go architecture:
 
 ## Development Commands
 
+All paths below are relative to this repo (`smokeping/panorama`).
+
 ### Full Stack Operations
 ```bash
-# Build and run entire monitoring stack
-docker compose up --build
-
-# Run in detached mode
-docker compose up -d
-
-# Stop all services
-docker compose down
-
-# View logs
-docker compose logs -f surveyor
+scripts/stack up          # docker compose up -d
+scripts/stack build       # rebuild the two Go service images
+scripts/stack down
+scripts/stack logs -f surveyor
+scripts/stack health      # run this after any change
 ```
 
-### Surveyor Development
+### Service Development
 ```bash
-# Run locally
-cd surveyor
-go run main.go
-
-# Build binary
+cd ../surveyor            # or ../geodesist
+go run main.go            # runs locally; -addr :8080 to change the port
 go build -o surveyor
-
-# Run with custom address
-go run main.go -addr :8080
 ```
 
 ### Testing
 ```bash
-# Run all tests from root
-cd surveyor && go test ./...
-
-# Verbose with coverage
+cd ../surveyor && go test ./...
 go test -v -cover ./...
-
-# Specific package tests
-go test -v ./surveyor/...
 ```
+
+`go test` runs vet as part of the build, so a vet finding fails the run outright.
+`../geodesist` has no tests; verify it with `go build ./... && go vet ./...` plus
+`scripts/prom query 'amplifi_clients_count'`.
 
 ### Code Quality
 ```bash
-# Format code
-cd surveyor && go fmt ./...
-
-# Check for common mistakes
-go vet ./...
-
-# Static analysis
+cd ../surveyor && go fmt ./... && go vet ./...
 staticcheck ./...
 ```
 
@@ -177,6 +162,28 @@ Grafana shows an "update your password" prompt while the admin password is liter
 | Smokeping | `adgn11db97ym8b` |
 | System | `ad9scbj` |
 
+## Metrics Reference
+
+The custom exporters do **not** namespace their metrics with the exporter name. Guessing `surveyor_*` returns nothing.
+
+| Exporter | Metrics |
+|----------|---------|
+| surveyor (`job="surveyor"`) | `snratio`, `power_level`, `frequency`, `correctable_count`, `uncorrectable_count`, `hmac_collect_duration_seconds`. All labelled by `channel_id` |
+| geodesist (`job="geodesist"`) | `amplifi_clients_count`, `amplifi_happiness_score`, `amplifi_signal_quality`, `amplifi_global_rx_bitrate`, `amplifi_global_tx_bitrate`, `amplifi_total_rx_bytes`, `amplifi_total_tx_bytes`. Per-host ones labelled by `host` |
+
+Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom metrics <substring>` to search, and `scripts/prom labels <metric>` for the label sets.
+
+## Environment
+
+`docker-compose.yml` reads these from `.env` (gitignored, and unreadable to Claude):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AMPLIFI_PASSWORD` | none, required | geodesist router login |
+| `AMPLIFI_ROUTER_ADDR` | `http://192.168.119.1` | router URL |
+| `GRAFANA_ADMIN_PASSWORD` | `smokeping` | admin password; also read by `scripts/grafana` |
+| `GRAFANA_LAN_IP` | `192.168.119.4` | the LAN address Grafana binds to |
+
 ## Gotchas
 
 - **The compose project name is pinned to `panorama` and the data volumes are pinned by name.** Do not remove either. Compose derives the project name from the directory by default and prefixes volume names with it, so moving or renaming the checkout would have silently reparented `surveyor_grafana` and `surveyor_prometheus` and started the stack against empty volumes. It looks exactly like losing 200+ days of history. The volumes are also declared `external`, so `docker compose down -v` cannot destroy them.
@@ -186,6 +193,9 @@ Grafana shows an "update your password" prompt while the admin password is liter
 - `node_memory_MemFree_bytes` and friends are **Linux-only** and exist only for `job="node"`. The macOS host exporter (`job="macos"`) uses different names: `node_memory_total_bytes`, `node_memory_free_bytes`, `node_memory_wired_bytes`.
 - Claude Code cannot read or write `~/Library` (macOS TCC blocks it even with the sandbox disabled), so `brew services` commands must be run by the user. Homebrew also needs `HOMEBREW_CACHE` relocated to a writable path to run at all under the sandbox.
 - Claude Code cannot read `.env` or `.env.example`. Ask the user to edit them, and have scripts source `.env` at runtime instead.
+- Every `git` command in these repos prints `error: fsmonitor_ipc__send_query: unspecified error on '.git/fsmonitor--daemon.ipc'` to stderr. It is harmless noise from the fsmonitor daemon and does not indicate the command failed. Check the exit code, not stderr.
+- The macOS host exporter is a Homebrew service (`brew services start node_exporter`), already enabled at login. If `job="macos"` goes down, it is that service, not the container stack. The user has to restart it; see the `~/Library` note above.
+- `scripts/stack deps` filters `go list -m -u all` down to modules actually named in `go.mod`. The unfiltered list permanently shows four upgradeable modules (`golang/protobuf`, `klauspost/compress`, `x/oauth2`, `x/sync`) that are test dependencies of dependencies. `go get -u ./...` will never touch them, so do not chase them.
 
 ## Upgrading
 

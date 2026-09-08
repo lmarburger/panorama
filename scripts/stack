@@ -165,8 +165,21 @@ cmd_versions() {
 cmd_deps() {
   for mod in surveyor geodesist; do
     echo "$mod"
+    local dir="../$mod"
+    if [ ! -d "$dir" ]; then
+      bad "$dir not checked out (run scripts/setup)"
+      FAILURES=$((FAILURES + 1))
+      echo
+      continue
+    fi
+    # `go list -m -u all` walks the whole module graph, including test
+    # dependencies of dependencies that are not in go.mod and that
+    # `go get -u ./...` will never update. Reporting those is permanent noise,
+    # so keep only modules the module actually requires.
     local out
-    out="$( (cd "$mod" && go list -m -u all 2>/dev/null | grep "\[") || true)"
+    out="$(cd "$dir" && go list -m -u all 2>/dev/null | grep "\[" | while read -r line; do
+      grep -qE "(^|[[:space:]])${line%% *}[[:space:]]" go.mod 2>/dev/null && printf '%s\n' "$line"
+    done || true)"
     if [ -z "$out" ]; then
       note "(up to date)"
     else
@@ -174,7 +187,8 @@ cmd_deps() {
     fi
     echo
   done
-  note "update with: cd <mod> && go get -u ./... && go mod tidy && go test ./... && go vet ./..."
+  [ "$FAILURES" -eq 0 ] || return 1
+  note "update with: cd ../<mod> && go get -u ./... && go mod tidy && go test ./... && go vet ./..."
 }
 
 case "${1:-}" in
