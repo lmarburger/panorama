@@ -126,7 +126,17 @@ scripts/prom metrics [substring]       # list metric names
 scripts/prom labels <metric>           # label sets for a metric
 scripts/prom targets [up|down]         # scrape target health
 scripts/prom api <path>                # raw call
+
+scripts/stack health                   # full post-change verification
+scripts/stack ports                    # prove Grafana is not exposed beyond loopback + LAN
+scripts/stack versions [latest]        # running versions; `latest` checks upstream
+scripts/stack deps                     # Go module updates in both service repos
+scripts/stack ps | logs | pull | build | up | restart | down
 ```
+
+**Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, and that both custom exporters emit real metrics rather than only Go internals. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
+
+`up`, `restart`, and `down` are deliberately **not** in the permission allowlist, since they interrupt collection. Everything else in `scripts/stack` runs unprompted.
 
 `scripts/grafana panels <uid>` is the fastest way to find which query drives a panel. `scripts/prom targets down` is the fastest health check.
 

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+#
+# Panorama stack lifecycle and verification.
+#
+#   scripts/stack ps                    container status
+#   scripts/stack health                full post-change verification
+#   scripts/stack ports                 prove Grafana is not exposed beyond loopback + LAN
+#   scripts/stack versions [latest]     running image versions; `latest` also checks upstream
+#   scripts/stack deps                  Go module updates available in both service repos
+#   scripts/stack logs [svc] [args]     docker compose logs
+#   scripts/stack pull                  pull the pinned images
+#   scripts/stack build [svc]           rebuild the Go service images
+#   scripts/stack up [svc]              up -d
+#   scripts/stack restart [svc]
+#   scripts/stack down
+#
+# `health` is the one to run after any change. It checks container state,
+# every Prometheus scrape target, Grafana, and that both custom exporters are
+# emitting real metrics rather than just answering /metrics with Go internals.
+#
+# The embedded Python runs inside single-quoted shell strings, so it must not
+# contain a single quote.
+set -euo pipefail
+
+cd "$(cd "$(dirname "$0")/.." && pwd)"
+
+# Grafana's LAN binding. Keep in sync with docker-compose.yml.
+LAN_IP="${GRAFANA_LAN_IP:-192.168.119.4}"
+GRAFANA_PORT=4242
+
+die() { printf 'stack: %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'; }
+
+ok()   { printf '  \033[32mok\033[0m    %s\n' "$*"; }
+bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
+note() { printf '        %s\n' "$*"; }
+
+FAILURES=0
+check() { if [ "$1" = 0 ]; then ok "$2"; else bad "$2"; FAILURES=$((FAILURES + 1)); fi; }
+
+cmd_ps() { docker compose ps --format '{{.Name}}\t{{.Image}}\t{{.Status}}'; }
+
+cmd_health() {
+  echo "containers"
+  local expected="surveyor geodesist grafana prometheus blackbox node-exporter"
+  local running
+  running="$(docker compose ps --status running --format '{{.Name}}' 2>/dev/null || true)"
+  for svc in $expected; do
+    if printf '%s\n' "$running" | grep -qx "$svc"; then check 0 "$svc running"; else check 1 "$svc NOT running"; fi
+  done
+
+  echo
+  echo "prometheus targets"
+  local down
+  down="$(scripts/prom targets down 2>/dev/null || true)"
+  if [ -z "$down" ]; then
+    check 0 "all scrape targets up ($(scripts/prom targets 2>/dev/null | wc -l | tr -d ' ') total)"
+  else
+    check 1 "targets down:"
+    printf '%s\n' "$down" | sed 's/^/          /'
+  fi
+
+  echo
+  echo "grafana"
+  if curl -sf -m 5 "http://127.0.0.1:$GRAFANA_PORT/api/health" >/dev/null 2>&1; then
+    check 0 "reachable on loopback ($(curl -s -m 5 "http://127.0.0.1:$GRAFANA_PORT/api/health" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'))"
+  else
+    check 1 "not reachable on loopback"
+  fi
+  if scripts/grafana list >/dev/null 2>&1; then
+    check 0 "API auth works ($(scripts/grafana list 2>/dev/null | wc -l | tr -d ' ') dashboards)"
+  else
+    check 1 "API auth failing (check GRAFANA_ADMIN_PASSWORD in .env)"
+  fi
+
+  echo
+  echo "exporters emitting real metrics"
+  # A bare `up` only proves /metrics answered. These confirm the exporters are
+  # actually reaching the modem and the router.
+  exporter_metrics() {
+    docker exec prometheus wget -qO- "http://$1/metrics" 2>/dev/null \
+      | grep -v "^#" | grep -cv "^go_\|^promhttp_\|^process_" || true
+  }
+  local n
+  n="$(exporter_metrics surveyor)"
+  if [ "${n:-0}" -gt 0 ]; then check 0 "surveyor: $n modem metrics"; else check 1 "surveyor: no modem metrics (is the modem reachable?)"; fi
+  n="$(exporter_metrics geodesist)"
+  if [ "${n:-0}" -gt 0 ]; then check 0 "geodesist: $n amplifi metrics"; else check 1 "geodesist: no amplifi metrics (check AMPLIFI_PASSWORD)"; fi
+
+  echo
+  if [ "$FAILURES" -eq 0 ]; then
+    printf '\033[32mall checks passed\033[0m\n'
+  else
+    printf '\033[31m%s check(s) failed\033[0m\n' "$FAILURES"
+    return 1
+  fi
+}
+
+cmd_ports() {
+  echo "declared bindings"
+  docker port grafana | sed 's/^/  /'
+
+  echo
+  echo "reachable where expected"
+  for target in 127.0.0.1 "$LAN_IP"; do
+    if curl -sf -m 3 "http://$target:$GRAFANA_PORT/api/health" >/dev/null 2>&1; then
+      check 0 "$target:$GRAFANA_PORT"
+    else
+      check 1 "$target:$GRAFANA_PORT unreachable"
+    fi
+  done
+
+  echo
+  echo "not reachable anywhere else"
+  # The security property: Grafana must not answer on any other host address.
+  local others
+  others="$(ifconfig 2>/dev/null | grep "inet " | awk '{print $2}' | grep -vx "127.0.0.1" | grep -vx "$LAN_IP" || true)"
+  if [ -z "$others" ]; then
+    note "(no other host addresses to test)"
+  fi
+  for ip in $others; do
+    if curl -sf -m 2 "http://$ip:$GRAFANA_PORT/api/health" >/dev/null 2>&1; then
+      check 1 "$ip:$GRAFANA_PORT IS REACHABLE (should not be)"
+    else
+      ok "$ip blocked"
+    fi
+  done
+
+  echo
+  if [ "$FAILURES" -eq 0 ]; then
+    printf '\033[32mbinding is correctly restricted\033[0m\n'
+  else
+    printf '\033[31m%s problem(s)\033[0m\n' "$FAILURES"
+    return 1
+  fi
+}
+
+cmd_versions() {
+  echo "running"
+  printf '  %-16s %s\n' prometheus    "$(docker exec prometheus prometheus --version 2>&1 | head -1 | awk '{print $3}')"
+  printf '  %-16s %s\n' grafana       "$(docker exec grafana grafana server -v 2>&1 | head -1 | awk '{print $2}')"
+  printf '  %-16s %s\n' blackbox      "$(docker exec blackbox /bin/blackbox_exporter --version 2>&1 | head -1 | awk '{print $3}')"
+  printf '  %-16s %s\n' node-exporter "$(docker exec node-exporter /bin/node_exporter --version 2>&1 | head -1 | awk '{print $3}')"
+  printf '  %-16s %s\n' "macos node"  "$(scripts/prom query 'node_exporter_build_info{job="macos"}' 2>/dev/null | grep -oE '(^|[,{])version=[^,}]*' | cut -d= -f2 | head -1)"
+
+  echo
+  echo "pinned in docker-compose.yml"
+  grep -E "^\s+image:" docker-compose.yml | grep -v "^#" | sed 's/^ *image: /  /'
+
+  if [ "${1:-}" != "latest" ]; then
+    echo
+    note "run \"scripts/stack versions latest\" to check upstream (pulls floating tags)"
+    return 0
+  fi
+
+  echo
+  echo "latest upstream"
+  printf '  %-16s %s\n' prometheus    "$(docker run --rm --entrypoint /bin/prometheus prom/prometheus --version 2>&1 | head -1 | awk '{print $3}')"
+  printf '  %-16s %s\n' grafana       "$(docker run --rm --entrypoint grafana grafana/grafana-oss server -v 2>&1 | head -1 | awk '{print $2}')"
+  printf '  %-16s %s\n' blackbox      "$(docker run --rm --entrypoint /bin/blackbox_exporter prom/blackbox-exporter:latest --version 2>&1 | head -1 | awk '{print $3}')"
+  printf '  %-16s %s\n' node-exporter "$(docker run --rm --entrypoint /bin/node_exporter prom/node-exporter:latest --version 2>&1 | head -1 | awk '{print $3}')"
+}
+
+cmd_deps() {
+  for mod in surveyor geodesist; do
+    echo "$mod"
+    local out
+    out="$( (cd "$mod" && go list -m -u all 2>/dev/null | grep "\[") || true)"
+    if [ -z "$out" ]; then
+      note "(up to date)"
+    else
+      printf '%s\n' "$out" | sed 's/^/  /'
+    fi
+    echo
+  done
+  note "update with: cd <mod> && go get -u ./... && go mod tidy && go test ./... && go vet ./..."
+}
+
+case "${1:-}" in
+  ps)       shift; cmd_ps "$@" ;;
+  health)   shift; cmd_health "$@" ;;
+  ports)    shift; cmd_ports "$@" ;;
+  versions) shift; cmd_versions "$@" ;;
+  deps)     shift; cmd_deps "$@" ;;
+  logs)     shift; docker compose logs "$@" ;;
+  pull)     shift; docker compose pull "$@" ;;
+  build)    shift; docker compose build "$@" ;;
+  up)       shift; docker compose up -d "$@" ;;
+  restart)  shift; docker compose restart "$@" ;;
+  down)     shift; docker compose down "$@" ;;
+  ""|-h|--help|help) usage ;;
+  *) die "unknown command: $1 (try --help)" ;;
+esac
