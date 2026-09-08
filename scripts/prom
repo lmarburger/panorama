@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+#
+# Prometheus API helper for the Panorama stack.
+#
+#   scripts/prom query '<promql>'                    instant query
+#   scripts/prom range '<promql>' [from] [step]      range query, e.g. range 'up' 24h 5m
+#   scripts/prom metrics [substring]                 list metric names, optionally filtered
+#   scripts/prom labels <metric>                     label sets currently present for a metric
+#   scripts/prom targets [up|down]                   scrape target health
+#   scripts/prom api <path> [curl args]              raw API call, e.g. api /api/v1/status/config
+#
+# Prometheus deliberately has no host port binding, so this talks to it over
+# `docker exec`. Set PROM_URL to reach it directly instead (e.g. from inside the
+# compose network), and PROM_CONTAINER to use a different container name.
+#
+# The embedded Python runs inside single-quoted shell strings, so it must not
+# contain a single quote anywhere.
+set -euo pipefail
+
+PROM_CONTAINER="${PROM_CONTAINER:-prometheus}"
+PROM_URL="${PROM_URL:-}"
+
+die() { printf 'prom: %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'; }
+
+# GET a path (already query-string encoded) from the Prometheus API.
+fetch() {
+  local path="$1"; shift || true
+  if [ -n "$PROM_URL" ]; then
+    curl -sS --fail-with-body "$PROM_URL$path" "$@"
+  else
+    docker exec "$PROM_CONTAINER" wget -qO- "http://localhost:9090$path" \
+      || die "request failed: $path"
+  fi
+}
+
+urlencode() {
+  python3 -c '
+import sys, urllib.parse
+print(urllib.parse.quote(sys.argv[1], safe=""))
+' "$1"
+}
+
+# Render an instant-query vector as one "value  {labels}" line per series.
+render_instant() {
+  python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+if r.get("status") != "success":
+    sys.exit("error: {}: {}".format(r.get("errorType"), r.get("error")))
+data = r["data"]
+if data["resultType"] == "scalar":
+    print(data["result"][1]); sys.exit()
+res = data["result"]
+if not res:
+    print("(empty result)"); sys.exit()
+for s in res:
+    m = dict(s["metric"]); name = m.pop("__name__", "")
+    labels = ",".join("{}={}".format(k, v) for k, v in sorted(m.items()))
+    print("{:>24}  {}{{{}}}".format(s["value"][1], name, labels))
+'
+}
+
+cmd_query() {
+  local q="${1:-}"
+  [ -n "$q" ] || die "query requires a PromQL expression"
+  fetch "/api/v1/query?query=$(urlencode "$q")" | render_instant
+}
+
+cmd_range() {
+  local q="${1:-}" from="${2:-1h}" step="${3:-}"
+  [ -n "$q" ] || die "range requires a PromQL expression"
+  local start end
+  end="$(date +%s)"
+  start="$(python3 -c '
+import re, sys
+units = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+m = re.fullmatch(r"(\d+)([smhdw])", sys.argv[1])
+if not m:
+    sys.exit("bad duration: " + sys.argv[1])
+print(int(sys.argv[2]) - int(m.group(1)) * units[m.group(2)])
+' "$from" "$end")"
+  # Default to ~200 points across the window so output stays readable.
+  [ -n "$step" ] || step="$(( (end - start) / 200 ))s"
+
+  fetch "/api/v1/query_range?query=$(urlencode "$q")&start=$start&end=$end&step=$(urlencode "$step")" \
+    | python3 -c '
+import datetime, json, sys
+r = json.load(sys.stdin)
+if r.get("status") != "success":
+    sys.exit("error: {}: {}".format(r.get("errorType"), r.get("error")))
+res = r["data"]["result"]
+if not res:
+    print("(empty result)"); sys.exit()
+
+def fmt(t):
+    return datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
+
+for s in res:
+    m = dict(s["metric"]); name = m.pop("__name__", "")
+    labels = ",".join("{}={}".format(k, v) for k, v in sorted(m.items()))
+    pts = s["values"]
+    vals = [float(v[1]) for v in pts]
+    first, last = pts[0], pts[-1]
+    print("{}{{{}}}".format(name, labels))
+    print("  {} points  {} -> {}".format(len(pts), fmt(first[0]), fmt(last[0])))
+    print("  first={}  last={}  min={:.6g}  max={:.6g}  avg={:.6g}".format(
+        first[1], last[1], min(vals), max(vals), sum(vals) / len(vals)))
+'
+}
+
+cmd_metrics() {
+  local filter="${1:-}"
+  fetch "/api/v1/label/__name__/values" | FILTER="$filter" python3 -c '
+import json, os, sys
+f = os.environ.get("FILTER", "").lower()
+names = [n for n in json.load(sys.stdin)["data"] if f in n.lower()]
+print("\n".join(names))
+print("({} metrics)".format(len(names)), file=sys.stderr)
+'
+}
+
+cmd_labels() {
+  local metric="${1:-}"
+  [ -n "$metric" ] || die "labels requires a metric name"
+  fetch "/api/v1/series?match%5B%5D=$(urlencode "$metric")" | python3 -c '
+import json, sys
+for s in json.load(sys.stdin)["data"]:
+    m = dict(s); m.pop("__name__", None)
+    print(",".join("{}={}".format(k, v) for k, v in sorted(m.items())))
+'
+}
+
+cmd_targets() {
+  local want="${1:-}"
+  fetch "/api/v1/targets?state=active" | WANT="$want" python3 -c '
+import json, os, sys
+want = os.environ.get("WANT", "")
+rows = json.load(sys.stdin)["data"]["activeTargets"]
+rows = [t for t in rows if not want or t["health"] == want]
+for t in sorted(rows, key=lambda t: (t["labels"].get("job", ""), t["labels"].get("instance", ""))):
+    job = t["labels"].get("job", "")
+    inst = t["labels"].get("instance", "")
+    err = "  " + t["lastError"] if t.get("lastError") else ""
+    print("{:<8} {:<12} {}{}".format(t["health"], job, inst, err))
+'
+}
+
+cmd_api() {
+  local path="${1:-}"; shift || true
+  [ -n "$path" ] || die "api requires a path, e.g. /api/v1/status/runtimeinfo"
+  fetch "$path" "$@"
+  echo
+}
+
+case "${1:-}" in
+  query)   shift; cmd_query "$@" ;;
+  range)   shift; cmd_range "$@" ;;
+  metrics) shift; cmd_metrics "$@" ;;
+  labels)  shift; cmd_labels "$@" ;;
+  targets) shift; cmd_targets "$@" ;;
+  api)     shift; cmd_api "$@" ;;
+  ""|-h|--help|help) usage ;;
+  *) die "unknown command: $1 (try --help)" ;;
+esac

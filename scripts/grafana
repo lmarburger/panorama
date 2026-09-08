@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+#
+# Grafana API helper for the Panorama stack.
+#
+#   scripts/grafana list                    list dashboards (uid + title)
+#   scripts/grafana get <uid> [outfile]     fetch a dashboard; writes JSON to stdout or outfile
+#   scripts/grafana save <file> [--label L] save a dashboard back (overwrite: true)
+#   scripts/grafana panels <uid>            print panel titles, types, and PromQL targets
+#   scripts/grafana api <path> [curl args]  raw API call, e.g. api /api/health
+#
+# Override the endpoint or credentials with GRAFANA_URL / GRAFANA_AUTH.
+#
+# The embedded Python runs inside single-quoted shell strings, so it must not
+# contain a single quote anywhere.
+set -euo pipefail
+
+# Pick up GRAFANA_ADMIN_PASSWORD from the gitignored .env so the credential lives
+# in exactly one place and never has to be passed on the command line.
+ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a; . "$ENV_FILE"; set +a
+fi
+
+GRAFANA_URL="${GRAFANA_URL:-http://localhost:4242}"
+GRAFANA_AUTH="${GRAFANA_AUTH:-admin:${GRAFANA_ADMIN_PASSWORD:-smokeping}}"
+
+die() { printf 'grafana: %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'; }
+
+api() {
+  local path="$1"; shift
+  curl -sS --fail-with-body -u "$GRAFANA_AUTH" "$GRAFANA_URL$path" "$@"
+}
+
+cmd_list() {
+  api "/api/search?type=dash-db" | python3 -c '
+import json, sys
+for d in json.load(sys.stdin):
+    print(d["uid"] + "\t" + d["title"])
+'
+}
+
+cmd_get() {
+  local uid="${1:-}" out="${2:-}"
+  [ -n "$uid" ] || die "get requires a dashboard uid (see: scripts/grafana list)"
+  if [ -n "$out" ]; then
+    api "/api/dashboards/uid/$uid" -o "$out"
+    printf 'wrote %s\n' "$out"
+  else
+    api "/api/dashboards/uid/$uid"
+  fi
+}
+
+# Accepts either a full GET response ({"dashboard": {...}, "meta": {...}}) or a
+# bare dashboard object, so a file from `get` can be edited and fed straight back.
+cmd_save() {
+  local file="${1:-}"; shift || true
+  local label=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --label) label="${2:-}"; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  [ -n "$file" ] || die "save requires a JSON file"
+  [ -f "$file" ] || die "no such file: $file"
+
+  local payload
+  payload="$(LABEL="$label" python3 -c '
+import json, os, sys
+doc = json.load(open(sys.argv[1]))
+dash = doc.get("dashboard", doc)
+payload = {"dashboard": dash, "overwrite": True}
+if os.environ.get("LABEL"):
+    payload["message"] = os.environ["LABEL"]
+folder = (doc.get("meta") or {}).get("folderUid")
+if folder:
+    payload["folderUid"] = folder
+json.dump(payload, sys.stdout)
+' "$file")"
+
+  printf '%s' "$payload" \
+    | api "/api/dashboards/db" -X POST -H 'Content-Type: application/json' --data-binary @- \
+    | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+uid, ver, url = r.get("uid"), r.get("version"), r.get("url")
+print("saved {} version {} -> {}".format(uid, ver, url))
+'
+}
+
+cmd_panels() {
+  local uid="${1:-}"
+  [ -n "$uid" ] || die "panels requires a dashboard uid"
+  api "/api/dashboards/uid/$uid" | python3 -c '
+import json, sys
+db = json.load(sys.stdin)["dashboard"]
+print("{}  (uid {}, version {})".format(db.get("title"), db.get("uid"), db.get("version")))
+
+def walk(panels, indent=2):
+    for p in panels:
+        pad = " " * indent
+        print(pad + "[{}] {}".format(p.get("type"), p.get("title")))
+        for t in p.get("targets") or []:
+            expr = t.get("expr")
+            if expr:
+                print(pad + "    expr: " + " ".join(expr.split()))
+        if p.get("panels"):
+            walk(p["panels"], indent + 4)
+
+walk(db.get("panels") or [])
+'
+}
+
+cmd_api() {
+  local path="${1:-}"; shift || true
+  [ -n "$path" ] || die "api requires a path, e.g. /api/health"
+  api "$path" "$@"
+  echo
+}
+
+case "${1:-}" in
+  list)   shift; cmd_list "$@" ;;
+  get)    shift; cmd_get "$@" ;;
+  save)   shift; cmd_save "$@" ;;
+  panels) shift; cmd_panels "$@" ;;
+  api)    shift; cmd_api "$@" ;;
+  ""|-h|--help|help) usage ;;
+  *) die "unknown command: $1 (try --help)" ;;
+esac

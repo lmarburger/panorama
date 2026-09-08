@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/grafana:*)",
+      "Bash(./scripts/grafana:*)",
+      "Bash(scripts/prom:*)",
+      "Bash(./scripts/prom:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose config:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(docker stats:*)",
+      "Bash(docker inspect:*)",
+      "Bash(docker image inspect:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go list:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go fmt:*)",
+      "Bash(gofmt:*)"
+    ]
+  }
+}

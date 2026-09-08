@@ -3,3 +3,4 @@ surveyor/
 .claude/settings.local.json
 .env
 .env.local
+backups/
