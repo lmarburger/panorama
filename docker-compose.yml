@@ -1,12 +1,28 @@
+# Pinned so the project name never depends on the directory name again. Compose
+# derives it from the directory by default, which silently reparents the data
+# volumes if the checkout is ever moved or renamed.
+name: panorama
+
 volumes:
+  # These keep their original `surveyor_` prefix from when the checkout lived in
+  # a directory of that name. Renaming them would mean copying 12.5 GB of TSDB
+  # for no functional gain, so they are pinned explicitly instead.
+  #
+  # `external` means compose will not create or destroy them. That is deliberate:
+  # it makes `docker compose down -v` unable to take 200+ days of history with it.
+  # `scripts/setup` creates them on a fresh machine.
   grafana:
+    name: surveyor_grafana
+    external: true
   prometheus:
+    name: surveyor_prometheus
+    external: true
 
 services:
   surveyor:
     container_name: surveyor
     build:
-      context: surveyor
+      context: ../surveyor
       dockerfile: Dockerfile
     restart: unless-stopped
     command:
@@ -17,7 +33,7 @@ services:
   geodesist:
     container_name: geodesist
     build:
-      context: geodesist
+      context: ../geodesist
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:

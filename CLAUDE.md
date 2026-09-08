@@ -88,9 +88,22 @@ staticcheck ./...
 
 ## Repository Layout
 
-This repo tracks only the stack configuration: `docker-compose.yml`, `prometheus/`, `blackbox.yml`, `scripts/`, and this file.
+Three independent public repos live side by side under a plain `smokeping/` workspace directory. None of them is nested inside another.
 
-`surveyor/` and `geodesist/` are **separate git repositories** checked out inside this one, and both are listed in `.gitignore`. Changes to the Go services are commits in `lmarburger/surveyor` and `lmarburger/geodesist`, not here. Because the ignore entries are bare directory names, any new file added under either directory is invisible to this repo's git.
+```
+smokeping/
+  panorama/    lmarburger/panorama    compose, prometheus/, blackbox.yml, scripts/
+  surveyor/    lmarburger/surveyor    cable modem exporter
+  geodesist/   lmarburger/geodesist   AmpliFi exporter
+```
+
+`docker-compose.yml` builds the two services from `../surveyor` and `../geodesist`, so **both siblings must be checked out for the stack to build.** Run `scripts/setup` to see what is missing, or `scripts/setup --apply` to clone them and create the data volumes.
+
+Changes to the Go services are commits in their own repos, not this one. There is deliberately no submodule pointer: the repos are independent, and the tradeoff is that this repo does not record which service commit is deployed.
+
+### Why not nested
+
+The services used to be checked out *inside* this repo and hidden with bare `.gitignore` entries. That layout had a silent data-loss footgun: `git clean -xdf` here would have deleted both service repos, uncommitted work included, because ignored directories are fair game for clean. Siblings make that impossible.
 
 ## Service Ports
 
@@ -132,6 +145,8 @@ scripts/stack ports                    # prove Grafana is not exposed beyond loo
 scripts/stack versions [latest]        # running versions; `latest` checks upstream
 scripts/stack deps                     # Go module updates in both service repos
 scripts/stack ps | logs | pull | build | up | restart | down
+
+scripts/setup [--apply]                # check/fix sibling checkouts, volumes, .env
 ```
 
 **Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, and that both custom exporters emit real metrics rather than only Go internals. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
@@ -163,6 +178,8 @@ Grafana shows an "update your password" prompt while the admin password is liter
 | System | `ad9scbj` |
 
 ## Gotchas
+
+- **The compose project name is pinned to `panorama` and the data volumes are pinned by name.** Do not remove either. Compose derives the project name from the directory by default and prefixes volume names with it, so moving or renaming the checkout would have silently reparented `surveyor_grafana` and `surveyor_prometheus` and started the stack against empty volumes. It looks exactly like losing 200+ days of history. The volumes are also declared `external`, so `docker compose down -v` cannot destroy them.
 
 - **The "memory %" and "cpu %" panels under the Smokeping dashboard's `surveyor` row do not measure surveyor.** They query `node_memory_*` / `node_cpu_*` from `job="node"`, which is the OrbStack Linux VM the containers run in. Surveyor's own footprint is ~13 MB RSS. Use `process_resident_memory_bytes{job="surveyor"}` for the service itself.
 - Docker here is **OrbStack**, not Docker Desktop. It balloons VM memory to track actual usage instead of pre-allocating, so a high in-VM memory percentage is a weak pressure signal. Prefer `rate(node_vmstat_pgmajfault[5m])` or `node_memory_SwapFree_bytes`.

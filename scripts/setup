@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#
+# Prepare a machine to run the stack.
+#
+#   scripts/setup          report what is missing and what to do about it
+#   scripts/setup --apply  clone missing sibling repos and create missing volumes
+#
+# The three repos are independent and live side by side:
+#
+#   smokeping/
+#     panorama/    this repo: compose, prometheus config, scripts
+#     surveyor/    git@github.com:lmarburger/surveyor.git
+#     geodesist/   git@github.com:lmarburger/geodesist.git
+#
+# docker-compose.yml builds surveyor and geodesist from ../, so both must be
+# checked out next to this repo before the stack can build.
+set -euo pipefail
+
+cd "$(cd "$(dirname "$0")/.." && pwd)"
+WORKSPACE="$(cd .. && pwd)"
+
+APPLY=0
+[ "${1:-}" = "--apply" ] && APPLY=1
+
+die() { printf 'setup: %s\n' "$*" >&2; exit 1; }
+ok()   { printf '  \033[32mok\033[0m      %s\n' "$*"; }
+todo() { printf '  \033[33mmissing\033[0m %s\n' "$*"; }
+
+MISSING=0
+
+echo "sibling repos (in $WORKSPACE)"
+for repo in surveyor geodesist; do
+  url="git@github.com:lmarburger/$repo.git"
+  if [ -d "$WORKSPACE/$repo/.git" ]; then
+    ok "$repo"
+  elif [ "$APPLY" = 1 ]; then
+    git clone "$url" "$WORKSPACE/$repo" && ok "$repo cloned"
+  else
+    todo "$repo    git clone $url $WORKSPACE/$repo"
+    MISSING=$((MISSING + 1))
+  fi
+done
+
+echo
+echo "data volumes"
+# Declared `external` in docker-compose.yml, so compose will not create these.
+for vol in surveyor_grafana surveyor_prometheus; do
+  if docker volume inspect "$vol" >/dev/null 2>&1; then
+    ok "$vol"
+  elif [ "$APPLY" = 1 ]; then
+    docker volume create "$vol" >/dev/null && ok "$vol created"
+  else
+    todo "$vol    docker volume create $vol"
+    MISSING=$((MISSING + 1))
+  fi
+done
+
+echo
+echo "environment"
+if [ -f .env ]; then
+  ok ".env present"
+else
+  todo ".env    copy .env.example and fill in AMPLIFI_PASSWORD"
+  MISSING=$((MISSING + 1))
+fi
+
+echo
+if [ "$MISSING" -eq 0 ]; then
+  printf '\033[32mready. next: scripts/stack up && scripts/stack health\033[0m\n'
+else
+  printf '%s item(s) need attention. Re-run with --apply to fix what can be automated.\n' "$MISSING"
+  exit 1
+fi
