@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Panorama is a comprehensive network monitoring stack that combines cable modem signal quality monitoring with traditional network metrics. It consists of:
 
-- **Surveyor**: Custom Prometheus exporter for Surfboard cable modem signal statistics (SNR, power levels, error counts)
+- **Surveyor**: Custom Prometheus exporter for SURFboard cable modem signal statistics (SNR, power levels, error counts)
 - **Full monitoring stack**: Prometheus (2-year retention), Grafana (port 4242), Blackbox exporter, and Node exporter (Docker VM + native macOS)
 - **Docker Compose orchestration**: Easy deployment of the entire monitoring infrastructure
 
@@ -25,15 +25,11 @@ In this repo:
 In sibling repos (see Repository Layout):
 - `../surveyor/`: Go-based Prometheus exporter for cable modem metrics
   - Uses HNAP (Home Network Administration Protocol) with HMAC-MD5 authentication
-  - Targets Surfboard SB6141 modem at `https://192.168.100.1/HNAP1/`
+  - Targets an Arris SURFboard DOCSIS 3.1 modem at `https://192.168.100.1/HNAP1/`
 - `../geodesist/`: Go-based Prometheus exporter for AmpliFi wifi usage metrics
 
 ### Surveyor Architecture
-The surveyor codebase follows clean Go architecture:
-- `main.go`: HTTP server setup and Prometheus metrics endpoint
-- `surveyor/hnap.go`: HNAP client for secure modem communication
-- `surveyor/channelinfo.go`: Parser for channel signal data
-- `surveyor/report.go`: Prometheus collector implementation
+Surveyor polls the modem in a background loop (every 30s, backing off to 5m while failing) and `/metrics` serves the latest result. **A scrape never touches the modem**, so reading surveyor's `/metrics` by hand is free. `../surveyor/CLAUDE.md` has the file layout and the modem quirks found by probing it.
 
 ## Development Commands
 
@@ -116,6 +112,7 @@ scripts/grafana list                   # dashboards: uid + title
 scripts/grafana get <uid> [outfile]    # fetch dashboard JSON
 scripts/grafana save <file> [--label]  # save back (overwrite: true)
 scripts/grafana panels <uid>           # panel titles, types, and PromQL exprs
+scripts/grafana export [dir]           # write every dashboard to dashboards/<uid>.json
 scripts/grafana api <path> [curl args] # raw call, e.g. api /api/health
 
 scripts/prom query '<promql>'          # instant query
@@ -134,7 +131,7 @@ scripts/stack ps | logs | pull | build | up | restart | down
 scripts/setup [--apply]                # check/fix sibling checkouts, volumes, .env
 ```
 
-**Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, and that both custom exporters emit real metrics rather than only Go internals. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
+**Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, that surveyor's last modem poll succeeded (`surveyor_modem_up`), and that geodesist emits real metrics. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
 
 `up`, `restart`, and `down` are deliberately **not** in the permission allowlist, since they interrupt collection. Everything else in `scripts/stack` runs unprompted.
 
@@ -164,14 +161,18 @@ The credential is in a public repo on purpose. Grafana is bound to loopback and 
 | Smokeping | `adgn11db97ym8b` |
 | System | `ad9scbj` |
 
-## Metrics Reference
+Dashboards are checked in under `dashboards/`. After changing one in the UI or with `save`, run `scripts/grafana export` and commit the diff. To roll back, `scripts/grafana save dashboards/<uid>.json` from the commit you want.
 
-The custom exporters do **not** namespace their metrics with the exporter name. Guessing `surveyor_*` returns nothing.
+## Metrics Reference
 
 | Exporter | Metrics |
 |----------|---------|
-| surveyor (`job="surveyor"`) | `snratio`, `power_level`, `frequency`, `correctable_count`, `uncorrectable_count`, `hmac_collect_duration_seconds`. All labelled by `channel_id` |
+| surveyor (`job="surveyor"`) | `surveyor_downstream_{snr_db,power_dbmv,frequency_hertz,locked}`, `surveyor_downstream_{corrected,uncorrectable}_codewords_total`, `surveyor_upstream_{power_dbmv,frequency_hertz,symbol_rate,locked}`, labelled by `channel_id`, `frequency_mhz`, and `modulation` or `type`. Health: `surveyor_modem_up`, `surveyor_last_success_timestamp_seconds`, `surveyor_poll_errors_total{stage}`, `surveyor_poll_duration_seconds`, `surveyor_modem_info{firmware}` |
 | geodesist (`job="geodesist"`) | `amplifi_clients_count`, `amplifi_happiness_score`, `amplifi_signal_quality`, `amplifi_global_rx_bitrate`, `amplifi_global_tx_bitrate`, `amplifi_total_rx_bytes`, `amplifi_total_tx_bytes`. Per-host ones labelled by `host` |
+
+Surveyor's metrics were renamed on 2026-09-29. History before that is under the old unprefixed names (`snratio`, `power_level`, `frequency`, `correctable_count`, `uncorrectable_count`, `hmac_collect_duration_seconds`, labelled only by `channel_id`). The dashboard queries both, so the old half of each query can be deleted once that data ages out of the 2-year retention.
+
+geodesist does **not** namespace its metrics with the exporter name: guessing `geodesist_*` returns nothing.
 
 Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom metrics <substring>` to search, and `scripts/prom labels <metric>` for the label sets.
 
@@ -182,6 +183,7 @@ Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `AMPLIFI_PASSWORD` | none, required | geodesist router login |
+| `SURVEYOR_MODEM_PASSWORD` | none, required | surveyor modem login; surveyor exits at startup without it |
 | `AMPLIFI_ROUTER_ADDR` | `http://192.168.119.1` | router URL |
 | `GRAFANA_ADMIN_PASSWORD` | `panorama` | admin password; also read by `scripts/grafana` |
 | `GRAFANA_LAN_IP` | `192.168.119.4` | the LAN address Grafana binds to |
@@ -190,6 +192,8 @@ Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom
 
 - **The compose project name is pinned to `panorama` and the data volumes are pinned by name.** Do not remove either. Compose derives the project name from the directory by default and prefixes volume names with it, so moving or renaming the checkout would have silently reparented `surveyor_grafana` and `surveyor_prometheus` and started the stack against empty volumes. It looks exactly like losing 200+ days of history. The volumes are also declared `external`, so `docker compose down -v` cannot destroy them.
 
+- **`prometheus/prometheus.yml` is a single-file bind mount.** Editors (and Claude's Edit tool) save by replacing the file, which leaves the container holding the old, deleted inode: the file vanishes inside the container and a SIGHUP reloads nothing. After editing it, `scripts/stack restart prometheus`.
+- **Downstream channels with `modulation="Unknown"` are not carrying data.** Since the ISP went to 32 channels on 2026-09-21, the lowest ones (555 to 567 MHz) report SNR 0 and power around -40 dBmV. The SNR and power percentile panels filter them out; the per-channel panels and the "unusable downstream channels" stat show them.
 - **The "memory %" and "cpu %" panels under the Smokeping dashboard's `surveyor` row do not measure surveyor.** They query `node_memory_*` / `node_cpu_*` from `job="node"`, which is the OrbStack Linux VM the containers run in. Surveyor's own footprint is ~13 MB RSS. Use `process_resident_memory_bytes{job="surveyor"}` for the service itself.
 - Docker here is **OrbStack**, not Docker Desktop. It balloons VM memory to track actual usage instead of pre-allocating, so a high in-VM memory percentage is a weak pressure signal. Prefer `rate(node_vmstat_pgmajfault[5m])` or `node_memory_SwapFree_bytes`.
 - `node_memory_MemFree_bytes` and friends are **Linux-only** and exist only for `job="node"`. The macOS host exporter (`job="macos"`) uses different names: `node_memory_total_bytes`, `node_memory_free_bytes`, `node_memory_wired_bytes`.
@@ -213,7 +217,7 @@ To move to a newer release, back up dashboards first (`scripts/grafana get <uid>
 ## Key Technical Details
 
 1. **HNAP Authentication**: Uses HMAC-MD5 with specific header requirements for secure modem communication
-2. **Metrics Collection**: Parses HTML from modem's signal data page to extract channel statistics
+2. **Metrics Collection**: One bundled HNAP `GetMultipleHNAPs` request returns downstream, upstream, and software info as `^`-delimited records
 3. **Prometheus Retention**: Configured for 2 years of data retention
 4. **Network Probing**: Blackbox exporter configured for ICMP, TCP, and DNS probes
 5. **Go Version**: Both modules declare `go 1.26.0`. Docker builds use `golang:1.27-trixie` and run on `debian:trixie-slim`.
@@ -222,7 +226,6 @@ To move to a newer release, back up dashboards first (`scripts/grafana get <uid>
 
 - Always run tests before committing changes to surveyor
 - Tests use testify for assertions
-- Focus on HNAP client and channel info parser functionality
-- Mock HTTP responses for unit tests to avoid dependency on actual modem
+- Surveyor's tests include a fake TLS modem (`surveyor/client_test.go`) that reproduces the real login and session behavior, so they never need the actual modem
 - `geodesist` has **no tests at all**. Verify it with `go build ./... && go vet ./...`, and confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
 - `go test` runs vet as part of the build, so a vet finding fails the test run rather than merely warning. Go 1.24 added the non-constant format string check, which is worth knowing when bumping the toolchain.
