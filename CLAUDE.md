@@ -120,11 +120,15 @@ scripts/prom metrics [substring]       # list metric names
 scripts/prom labels <metric>           # label sets for a metric
 scripts/prom targets [up|down]         # scrape target health
 scripts/prom api <path>                # raw call
+scripts/prom tsdb                      # series by job and metric, retention, disk use
+scripts/prom remote                    # remote write delivery + Grafana Cloud billable series
+scripts/prom check                     # promtool-validate prometheus.yml, flag a stale bind mount
 
 scripts/stack health                   # full post-change verification
 scripts/stack ports                    # prove Grafana is not exposed beyond loopback + LAN
 scripts/stack versions [latest]        # running versions; `latest` checks upstream
 scripts/stack deps                     # Go module updates in both service repos
+scripts/stack modem                    # one timed HTTPS GET to the modem (no login)
 scripts/stack ps | logs | pull | build | up | restart | down
 
 scripts/setup [--apply]                # check/fix sibling checkouts, volumes, .env
@@ -133,6 +137,8 @@ scripts/setup [--apply]                # check/fix sibling checkouts, volumes, .
 **Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, that surveyor's last modem poll succeeded (`surveyor_modem_up`), and that geodesist emits real metrics. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
 
 `up`, `restart`, and `down` are deliberately **not** in the permission allowlist, since they interrupt collection. Everything else in `scripts/stack` runs unprompted.
+
+`scripts/grafana --cloud list|get|panels|api|query` runs against Grafana Cloud with the token from `.env`, and `scripts/grafana query '<promql>'` queries through Grafana's Prometheus data source, so `--cloud query` shows what actually arrived. `save` refuses `--cloud`; use `sync-cloud`. Use these instead of hand-rolled `curl`, `docker exec`, or sourcing `.env`: the scripts are allowlisted and the one-off commands each need approval.
 
 `scripts/grafana panels <uid>` is the fastest way to find which query drives a panel. `scripts/prom targets down` is the fastest health check.
 
@@ -198,13 +204,13 @@ Prometheus pushes a filtered copy of its data to a Grafana Cloud free-tier stack
 - Grafana Cloud keeps 14 days. The local TSDB stays the long-term archive.
 - Prometheus cannot expand env vars in its config, so compose renders `GRAFANA_CLOUD_PROM_TOKEN` into a `configs` file mounted at `/etc/prometheus/grafana-cloud-token` and read via `password_file`. Changing the token or the `configs` block needs `scripts/stack up prometheus` (recreate), not a restart.
 - **Local Grafana is the source of truth for dashboards; the cloud copy is a mirror.** Edit locally, then `scripts/grafana sync-cloud` (try `--dry-run` first). It overwrites cloud dashboards, repoints every Prometheus data source reference at the stack's `grafanacloud-*-prom`, tags each copy `panorama-sync`, and deletes tagged cloud dashboards that are gone locally. Untagged ones (Grafana Cloud's own, including IRM dashboards in General) are never touched. Edits made in the cloud UI are lost on the next sync. Unchanged dashboards are skipped, so the cloud version history only grows on real changes. Grafana Cloud's list endpoints and permission grants lag writes by a few seconds, so the script looks things up by uid, and deleting a dashboard seconds after creating it can 403 once.
-- Prometheus does not scrape itself, so check delivery from its own endpoint: `docker exec prometheus wget -qO- localhost:9090/metrics | grep prometheus_remote_storage_samples`.
+- Prometheus does not scrape itself, so its remote write counters exist only on its own `/metrics`. `scripts/prom remote` reads them and totals billable series for the jobs the keep rule sends.
 
 ## Gotchas
 
 - **The compose project name is pinned to `panorama` and the data volumes are pinned by name.** Do not remove either. Compose derives the project name from the directory by default and prefixes volume names with it, so moving or renaming the checkout would have silently reparented `surveyor_grafana` and `surveyor_prometheus` and started the stack against empty volumes. It looks exactly like losing 200+ days of history. The volumes are also declared `external`, so `docker compose down -v` cannot destroy them.
 
-- **`prometheus/prometheus.yml` is a single-file bind mount.** Editors (and Claude's Edit tool) save by replacing the file, which leaves the container holding the old, deleted inode: the file vanishes inside the container and a SIGHUP reloads nothing. After editing it, `scripts/stack restart prometheus`.
+- **`prometheus/prometheus.yml` is a single-file bind mount.** Editors (and Claude's Edit tool) save by replacing the file, which leaves the container holding the old, deleted inode: the file vanishes inside the container and a SIGHUP reloads nothing. After editing it, `scripts/stack restart prometheus`. `scripts/prom check` validates the file and reports whether the container is still on the old copy.
 - **Downstream channels with `modulation="Unknown"` are not carrying data.** Since the ISP went to 32 channels on 2026-09-21, the lowest ones (555 to 567 MHz) report SNR 0 and power around -40 dBmV. The SNR and power percentile panels filter them out; the per-channel panels and the "unusable downstream channels" stat show them.
 - **The "memory %" and "cpu %" panels under the Smokeping dashboard's `surveyor` row do not measure surveyor.** They query `node_memory_*` / `node_cpu_*` from `job="node"`, which is the OrbStack Linux VM the containers run in. Surveyor's own footprint is ~13 MB RSS. Use `process_resident_memory_bytes{job="surveyor"}` for the service itself.
 - Docker here is **OrbStack**, not Docker Desktop. It balloons VM memory to track actual usage instead of pre-allocating, so a high in-VM memory percentage is a weak pressure signal. Prefer `rate(node_vmstat_pgmajfault[5m])` or `node_memory_SwapFree_bytes`.

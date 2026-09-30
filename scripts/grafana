@@ -7,6 +7,8 @@
 #   scripts/grafana save <file> [--label L] save a dashboard back (overwrite: true)
 #   scripts/grafana panels <uid>            print panel titles, types, and PromQL targets
 #   scripts/grafana api <path> [curl args]  raw API call, e.g. api /api/health
+#   scripts/grafana query '<promql>'        instant query through the Prometheus data source
+#   scripts/grafana --cloud <command>       run list, get, panels, api, or query against Grafana Cloud
 #   scripts/grafana sync-cloud [--dry-run]  mirror every local dashboard to Grafana Cloud
 #
 # sync-cloud treats local as the source of truth. It overwrites each cloud
@@ -30,14 +32,76 @@ fi
 
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:4242}"
 GRAFANA_AUTH="${GRAFANA_AUTH:-admin:${GRAFANA_ADMIN_PASSWORD:-panorama}}"
+CLOUD=""
 
 die() { printf 'grafana: %s\n' "$*" >&2; exit 1; }
+
+if [ "${1:-}" = "--cloud" ]; then
+  shift
+  [ -n "${GRAFANA_CLOUD_URL:-}" ] || die "--cloud needs GRAFANA_CLOUD_URL in .env"
+  [ -n "${GRAFANA_CLOUD_API_TOKEN:-}" ] || die "--cloud needs GRAFANA_CLOUD_API_TOKEN in .env"
+  CLOUD=1
+  case "${1:-}" in
+    save|sync-cloud) die "$1 is local only: local Grafana is the source of truth (use sync-cloud)" ;;
+  esac
+fi
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'; }
 
 api() {
   local path="$1"; shift
-  curl -sS --fail-with-body -u "$GRAFANA_AUTH" "$GRAFANA_URL$path" "$@"
+  if [ -n "$CLOUD" ]; then
+    curl -sS --fail-with-body -H "Authorization: Bearer $GRAFANA_CLOUD_API_TOKEN" "${GRAFANA_CLOUD_URL%/}$path" "$@"
+  else
+    curl -sS --fail-with-body -u "$GRAFANA_AUTH" "$GRAFANA_URL$path" "$@"
+  fi
+}
+
+# The Prometheus data source dashboards query: the stack's grafanacloud-*-prom
+# in the cloud, the default Prometheus locally.
+prom_ds_uid() {
+  api /api/datasources | python3 -c '
+import json, sys
+ds = [d for d in json.load(sys.stdin) if d["type"] == "prometheus"]
+cloud = [d for d in ds if d["name"].startswith("grafanacloud-") and d["name"].endswith("-prom")]
+pick = cloud or [d for d in ds if d.get("isDefault")] or ds
+if not pick:
+    sys.exit("grafana: no Prometheus data source")
+print(pick[0]["uid"])
+'
+}
+
+cmd_query() {
+  local q="${1:-}"
+  [ -n "$q" ] || die "query requires a PromQL expression"
+  local ds
+  ds="$(prom_ds_uid)"
+  python3 -c '
+import json, sys
+print(json.dumps({"queries": [{"refId": "A", "datasource": {"type": "prometheus", "uid": sys.argv[1]},
+                               "expr": sys.argv[2], "instant": True}], "from": "now-5m", "to": "now"}))
+' "$ds" "$q" \
+    | api /api/ds/query -X POST -H 'Content-Type: application/json' --data-binary @- \
+    | python3 -c '
+import json, sys
+r = json.load(sys.stdin)["results"]["A"]
+if r.get("error"):
+    sys.exit("error: " + r["error"])
+frames = r.get("frames") or []
+rows = 0
+for f in frames:
+    fields = f["schema"]["fields"]
+    values = f["data"]["values"]
+    for i, field in enumerate(fields):
+        if field.get("type") == "time" or not values[i]:
+            continue
+        m = dict(field.get("labels") or {}); name = m.pop("__name__", "")
+        labels = ",".join("{}={}".format(k, v) for k, v in sorted(m.items()))
+        print("{:>24}  {}{{{}}}".format(values[i][-1], name, labels))
+        rows += 1
+if not rows:
+    print("(empty result)")
+'
 }
 
 cmd_list() {
@@ -256,6 +320,7 @@ case "${1:-}" in
   save)   shift; cmd_save "$@" ;;
   panels) shift; cmd_panels "$@" ;;
   api)    shift; cmd_api "$@" ;;
+  query)  shift; cmd_query "$@" ;;
   sync-cloud) shift; cmd_sync_cloud "$@" ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command: $1 (try --help)" ;;

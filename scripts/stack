@@ -7,6 +7,7 @@
 #   scripts/stack ports                 prove Grafana is not exposed beyond loopback + LAN
 #   scripts/stack versions [latest]     running image versions; `latest` also checks upstream
 #   scripts/stack deps                  Go module updates available in both service repos
+#   scripts/stack modem                 one timed HTTPS request to the modem's web server
 #   scripts/stack logs [svc] [args]     docker compose logs
 #   scripts/stack pull                  pull the pinned images
 #   scripts/stack build [svc]           rebuild the Go service images
@@ -172,6 +173,16 @@ cmd_versions() {
   printf '  %-16s %s\n' node-exporter "$(docker run --rm --entrypoint /bin/node_exporter prom/node-exporter:latest --version 2>&1 | head -1 | awk '{print $3}')"
 }
 
+# One unauthenticated GET, no HNAP login, so it answers "is the web server
+# alive and how slow" without adding to surveyor's session traffic. Run it
+# once, not in a loop: overlapping requests are what wedge this modem.
+cmd_modem() {
+  local addr="${MODEM_ADDR:-192.168.100.1}"
+  curl -sk -o /dev/null -m 30 \
+    -w "HTTP %{http_code}  connect %{time_connect}s  tls %{time_appconnect}s  total %{time_total}s\n" \
+    "https://$addr/" || die "no answer from https://$addr/ within 30s"
+}
+
 cmd_deps() {
   for mod in surveyor geodesist; do
     echo "$mod"
@@ -207,6 +218,7 @@ case "${1:-}" in
   ports)    shift; cmd_ports "$@" ;;
   versions) shift; cmd_versions "$@" ;;
   deps)     shift; cmd_deps "$@" ;;
+  modem)    shift; cmd_modem "$@" ;;
   logs)     shift; docker compose logs "$@" ;;
   pull)     shift; docker compose pull "$@" ;;
   build)    shift; docker compose build "$@" ;;

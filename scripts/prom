@@ -8,6 +8,9 @@
 #   scripts/prom labels <metric>                     label sets currently present for a metric
 #   scripts/prom targets [up|down]                   scrape target health
 #   scripts/prom api <path> [curl args]              raw API call, e.g. api /api/v1/status/config
+#   scripts/prom tsdb                                series by job and metric, retention, disk use
+#   scripts/prom remote                              remote write delivery and Grafana Cloud billable series
+#   scripts/prom check                               promtool-validate prometheus.yml; flag a stale bind mount
 #
 # Prometheus deliberately has no host port binding, so this talks to it over
 # `docker exec`. Set PROM_URL to reach it directly instead (e.g. from inside the
@@ -154,6 +157,99 @@ cmd_api() {
   echo
 }
 
+cmd_tsdb() {
+  echo "series by job"
+  cmd_query 'sort_desc(count by (job) ({job=~".+"}))'
+  echo
+  echo "top metrics by series"
+  fetch "/api/v1/status/tsdb" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)["data"]
+print("  head series: {}".format(d["headStats"]["numSeries"]))
+for x in d["seriesCountByMetricName"][:10]:
+    print("  {:>6}  {}".format(x["value"], x["name"]))
+'
+  echo
+  printf 'retention  %s\n' "$(fetch /api/v1/status/runtimeinfo | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["storageRetention"])')"
+  printf 'disk       %s\n' "$(docker exec "$PROM_CONTAINER" du -sh /prometheus | cut -f1)"
+}
+
+# Prometheus does not scrape itself, so its remote_storage counters exist only
+# on its own /metrics, never in the TSDB.
+cmd_remote() {
+  local metrics config targets series
+  metrics="$(fetch /metrics)"
+  config="$(fetch /api/v1/status/config)"
+  targets="$(fetch "/api/v1/targets?state=active")"
+  series="$(fetch "/api/v1/query?query=$(urlencode 'count by (job) ({job=~".+"})')")"
+  METRICS="$metrics" CONFIG="$config" TARGETS="$targets" SERIES="$series" python3 -c '
+import json, os, re, time
+
+values = {}
+for line in os.environ["METRICS"].splitlines():
+    m = re.match(r"(prometheus_remote_storage_\w+)(\{[^}]*\})? (\S+)$", line)
+    if m:
+        values.setdefault(m.group(1), 0.0)
+        values[m.group(1)] += float(m.group(3))
+if "prometheus_remote_storage_samples_total" not in values:
+    raise SystemExit("no remote write configured (or nothing sent since start)")
+
+v = lambda k: values.get("prometheus_remote_storage_" + k, 0)
+print("delivery since prometheus started")
+print("  sent      {:>10.0f}".format(v("samples_total")))
+print("  failed    {:>10.0f}".format(v("samples_failed_total")))
+print("  retried   {:>10.0f}".format(v("samples_retried_total")))
+print("  filtered  {:>10.0f}   (dropped by write_relabel_configs)".format(v("samples_dropped_total")))
+print("  pending   {:>10.0f}".format(v("samples_pending")))
+lag = v("highest_timestamp_in_seconds") - v("queue_highest_timestamp_seconds")
+print("  lag       {:>10.0f}s  (newest sample vs newest sent)".format(lag))
+
+cfg = json.loads(os.environ["CONFIG"])["data"]["yaml"]
+block = cfg.split("remote_write:", 1)[1] if "remote_write:" in cfg else ""
+# Loaded config lists each relabel rule as its own "- source_labels" item
+# with regex a few lines above action. Assumes a single job keep rule.
+keep = None
+for rule in re.split(r"\n\s*- ", block.split("queue_config:")[0]):
+    if "action: keep" in rule and "[job]" in rule:
+        keep = re.compile(re.search(r"regex:\s*(\S+)", rule).group(1).strip("\x27\x22"))
+
+interval = {}
+for t in json.loads(os.environ["TARGETS"])["data"]["activeTargets"]:
+    s = t["scrapeInterval"]
+    secs = int(s[:-1]) * {"s": 1, "m": 60, "h": 3600}[s[-1]]
+    interval[t["labels"]["job"]] = secs
+
+print()
+print("grafana cloud billable series (series x samples per minute, free tier 10k)")
+total = 0
+for r in sorted(json.loads(os.environ["SERIES"])["data"]["result"], key=lambda r: r["metric"]["job"]):
+    job = r["metric"]["job"]; n = int(float(r["value"][1]))
+    dpm = 60 / interval.get(job, 60)
+    sent = keep.fullmatch(job) if keep else True
+    billable = n * max(dpm, 1)
+    if sent:
+        total += billable
+    print("  {:<10} {:>6} series  every {:>3}s  {:>7.0f}  {}".format(
+        job, n, interval.get(job, "?"), billable, "sent" if sent else "local only"))
+print("  {:<10} {:>41.0f}".format("total sent", total))
+'
+}
+
+cmd_check() {
+  cd "$(dirname "$0")/.."
+  local image
+  image="$(grep -oE 'prom/prometheus:[^ "]+' docker-compose.yml | head -1)"
+  # --syntax-only because password_file paths only exist inside the real container.
+  docker run --rm -v "$PWD/prometheus/prometheus.yml:/p.yml:ro" --entrypoint promtool "$image" \
+    check config --syntax-only /p.yml
+  if docker exec "$PROM_CONTAINER" cat /etc/prometheus/prometheus.yml | cmp -s - prometheus/prometheus.yml; then
+    echo " running container sees the current file"
+  else
+    echo " STALE: the container still has an old copy (single-file bind mount). Run: scripts/stack restart prometheus"
+    return 1
+  fi
+}
+
 case "${1:-}" in
   query)   shift; cmd_query "$@" ;;
   range)   shift; cmd_range "$@" ;;
@@ -161,6 +257,9 @@ case "${1:-}" in
   labels)  shift; cmd_labels "$@" ;;
   targets) shift; cmd_targets "$@" ;;
   api)     shift; cmd_api "$@" ;;
+  tsdb)    shift; cmd_tsdb "$@" ;;
+  remote)  shift; cmd_remote "$@" ;;
+  check)   shift; cmd_check "$@" ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command: $1 (try --help)" ;;
 esac
