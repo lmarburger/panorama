@@ -3,6 +3,12 @@
 # volumes if the checkout is ever moved or renamed.
 name: panorama
 
+# Prometheus cannot expand environment variables in its own config, so the
+# remote write token reaches it as a file rendered from .env.
+configs:
+  grafana-cloud-token:
+    content: ${GRAFANA_CLOUD_PROM_TOKEN:-}
+
 volumes:
   # These keep their original `surveyor_` prefix from when the checkout lived in
   # a directory of that name. Renaming them would mean copying 12.5 GB of TSDB
@@ -75,6 +81,9 @@ services:
       - prometheus:/prometheus
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       # - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml
+    configs:
+      - source: grafana-cloud-token
+        target: /etc/prometheus/grafana-cloud-token
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - "--storage.tsdb.retention.time=730d"

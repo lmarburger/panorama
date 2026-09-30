@@ -186,6 +186,16 @@ Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom
 | `AMPLIFI_ROUTER_ADDR` | `http://192.168.119.1` | router URL |
 | `GRAFANA_ADMIN_PASSWORD` | `panorama` | admin password; also read by `scripts/grafana` |
 | `GRAFANA_LAN_IP` | `192.168.119.4` | the LAN address Grafana binds to |
+| `GRAFANA_CLOUD_PROM_TOKEN` | none | Grafana Cloud access policy token (`metrics:write` only) for Prometheus `remote_write` |
+
+## Grafana Cloud
+
+Prometheus pushes a filtered copy of its data to a Grafana Cloud free-tier stack (AWS us-east-2) so the dashboards can be viewed away from home. It is push only; nothing connects in.
+
+- Only jobs `icmp`, `tcp`, `dns`, `surveyor`, `geodesist` are sent (`write_relabel_configs` in `prometheus/prometheus.yml`). The free tier caps billable series at 10k, where a series scraped every 5s counts as 12. Those jobs come to about 4,900; `node` and `macos` alone would be about 30,000.
+- Grafana Cloud keeps 14 days. The local TSDB stays the long-term archive.
+- Prometheus cannot expand env vars in its config, so compose renders `GRAFANA_CLOUD_PROM_TOKEN` into a `configs` file mounted at `/etc/prometheus/grafana-cloud-token` and read via `password_file`. Changing the token or the `configs` block needs `scripts/stack up prometheus` (recreate), not a restart.
+- Prometheus does not scrape itself, so check delivery from its own endpoint: `docker exec prometheus wget -qO- localhost:9090/metrics | grep prometheus_remote_storage_samples`.
 
 ## Gotchas
 

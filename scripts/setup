@@ -67,6 +67,11 @@ if [ -f .env ]; then
       MISSING=$((MISSING + 1))
     fi
   done
+  if grep -q "^GRAFANA_CLOUD_PROM_TOKEN=." .env; then
+    ok "GRAFANA_CLOUD_PROM_TOKEN set"
+  else
+    printf '  \033[33moptional\033[0m GRAFANA_CLOUD_PROM_TOKEN    unset, so remote write to Grafana Cloud fails auth\n'
+  fi
 else
   todo ".env    copy .env.example and fill in AMPLIFI_PASSWORD and SURVEYOR_MODEM_PASSWORD"
   MISSING=$((MISSING + 1))

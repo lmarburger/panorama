@@ -77,3 +77,18 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox:9115
+
+# Off-site copy on Grafana Cloud's free tier, for viewing the dashboards away
+# from home. Push only: nothing outside the house connects in. The free tier
+# caps billable series at 10k, counted per sample per minute, so the 5s node and
+# macos jobs (~30k on their own) stay local. The rest is ~4,900. Grafana Cloud
+# keeps 14 days; the local TSDB remains the long-term archive.
+remote_write:
+  - url: https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
+    basic_auth:
+      username: '3625238'
+      password_file: /etc/prometheus/grafana-cloud-token
+    write_relabel_configs:
+      - source_labels: [job]
+        regex: icmp|tcp|dns|surveyor|geodesist
+        action: keep
