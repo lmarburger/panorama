@@ -59,8 +59,16 @@ echo
 echo "environment"
 if [ -f .env ]; then
   ok ".env present"
+  for var in AMPLIFI_PASSWORD SURVEYOR_MODEM_PASSWORD; do
+    if grep -q "^$var=." .env; then
+      ok "$var set"
+    else
+      todo "$var    add it to .env"
+      MISSING=$((MISSING + 1))
+    fi
+  done
 else
-  todo ".env    copy .env.example and fill in AMPLIFI_PASSWORD"
+  todo ".env    copy .env.example and fill in AMPLIFI_PASSWORD and SURVEYOR_MODEM_PASSWORD"
   MISSING=$((MISSING + 1))
 fi
 

@@ -82,9 +82,19 @@ cmd_health() {
     docker exec prometheus wget -qO- "http://$1/metrics" 2>/dev/null \
       | grep -v "^#" | grep -cv "^go_\|^promhttp_\|^process_" || true
   }
-  local n
-  n="$(exporter_metrics surveyor)"
-  if [ "${n:-0}" -gt 0 ]; then check 0 "surveyor: $n modem metrics"; else check 1 "surveyor: no modem metrics (is the modem reachable?)"; fi
+  # Surveyor always emits its own health metrics, so counting lines would pass
+  # even with the modem down. Its /metrics is served from a cached poll and
+  # never touches the modem, so reading it here adds no modem load.
+  local surveyor n
+  surveyor="$(docker exec prometheus wget -qO- http://surveyor/metrics 2>/dev/null || true)"
+  n="$(printf '%s\n' "$surveyor" | grep -c "^surveyor_downstream_snr_db{" || true)"
+  if printf '%s\n' "$surveyor" | grep -q "^surveyor_modem_up 1$"; then
+    check 0 "surveyor: modem up, $n downstream channels"
+  elif printf '%s\n' "$surveyor" | grep -q "^surveyor_modem_up 0$"; then
+    check 1 "surveyor: modem poll failing ($(printf '%s\n' "$surveyor" | awk '/^surveyor_poll_consecutive_failures /{print $2}') in a row; see scripts/stack logs surveyor)"
+  else
+    check 1 "surveyor: no surveyor_modem_up metric (is it running the current build?)"
+  fi
   n="$(exporter_metrics geodesist)"
   if [ "${n:-0}" -gt 0 ]; then check 0 "geodesist: $n amplifi metrics"; else check 1 "geodesist: no amplifi metrics (check AMPLIFI_PASSWORD)"; fi
 

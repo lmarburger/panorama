@@ -4,8 +4,8 @@ global:
 
 scrape_configs:
   - job_name: 'surveyor'
+    # Matches surveyor's poll interval. Scraping faster only repeats samples.
     scrape_interval: 30s
-    scrape_timeout: 15s
     static_configs:
       - targets: ['surveyor']
 

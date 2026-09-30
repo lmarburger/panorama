@@ -25,6 +25,8 @@ services:
       context: ../surveyor
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      - SURVEYOR_MODEM_PASSWORD=${SURVEYOR_MODEM_PASSWORD}
     command:
       - "--addr=:80"
     expose:
