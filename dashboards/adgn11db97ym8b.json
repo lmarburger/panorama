@@ -212,6 +212,7 @@
         "type": "prometheus",
         "uid": "cfdkjn0i586ioa"
       },
+      "description": "Percentiles across downstream channels. Excludes channels with modulation Unknown, which carry no data.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -357,7 +358,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "min (min_over_time(snratio[$__rate_interval:10s]))",
+          "expr": "min (min_over_time({__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "0p",
@@ -370,7 +371,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "min (quantile_over_time(0.2, snratio[$__rate_interval:10s]))",
+          "expr": "min (quantile_over_time(0.2, {__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "20p",
@@ -383,7 +384,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "min (quantile_over_time(0.4, snratio[$__rate_interval:10s]))",
+          "expr": "min (quantile_over_time(0.4, {__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "40p",
@@ -396,7 +397,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "avg (quantile_over_time(0.5, snratio[$__rate_interval:10s]))",
+          "expr": "avg (quantile_over_time(0.5, {__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "50p",
@@ -409,7 +410,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max (quantile_over_time(0.6, snratio[$__rate_interval:10s]))",
+          "expr": "max (quantile_over_time(0.6, {__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "60p",
@@ -422,7 +423,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max (quantile_over_time(0.8, snratio[$__rate_interval:10s]))",
+          "expr": "max (quantile_over_time(0.8, {__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "80p",
@@ -435,7 +436,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max (max_over_time(snratio[$__rate_interval:10s]))",
+          "expr": "max (max_over_time({__name__=~\"surveyor_downstream_snr_db|snratio\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "100p",
@@ -536,10 +537,21 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id) (rate(correctable_count[$__rate_interval]))",
-          "hide": false,
+          "expr": "sum by (frequency_mhz) (rate(surveyor_downstream_corrected_codewords_total[$__rate_interval]))",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "{{frequency_mhz}} MHz",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "sum by (channel_id) (rate(correctable_count[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "ch {{channel_id}} (before 9/29)",
           "range": true,
           "refId": "B"
         }
@@ -640,10 +652,21 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id) (rate(uncorrectable_count[$__rate_interval]))",
-          "hide": false,
+          "expr": "sum by (frequency_mhz) (rate(surveyor_downstream_uncorrectable_codewords_total[$__rate_interval]))",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "{{frequency_mhz}} MHz",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "sum by (channel_id) (rate(uncorrectable_count[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "ch {{channel_id}} (before 9/29)",
           "range": true,
           "refId": "B"
         }
@@ -1492,7 +1515,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(hmac_collect_duration_seconds_bucket[$__rate_interval])",
+          "expr": "sum by (le) (rate(surveyor_poll_duration_seconds_bucket[$__rate_interval])) or sum by (le) (rate(hmac_collect_duration_seconds_bucket[$__rate_interval]))",
           "format": "heatmap",
           "hide": false,
           "instant": false,
@@ -1501,7 +1524,7 @@
           "refId": "A"
         }
       ],
-      "title": "surveyor scrape duration",
+      "title": "surveyor poll duration",
       "type": "heatmap"
     },
     {
@@ -1509,7 +1532,7 @@
         "type": "prometheus",
         "uid": "cfdkjn0i586ioa"
       },
-      "description": "",
+      "description": "Percentiles across downstream channels. Excludes channels with modulation Unknown, which carry no data.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1655,7 +1678,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "min (min_over_time(power_level[$__rate_interval:10s]))",
+          "expr": "min (min_over_time({__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "0p",
@@ -1668,7 +1691,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "min (quantile_over_time(0.2, power_level[$__rate_interval:10s]))",
+          "expr": "min (quantile_over_time(0.2, {__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "20p",
@@ -1681,7 +1704,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "min (quantile_over_time(0.4, power_level[$__rate_interval:10s]))",
+          "expr": "min (quantile_over_time(0.4, {__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "40p",
@@ -1694,7 +1717,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "avg (quantile_over_time(0.5, power_level[$__rate_interval:10s]))",
+          "expr": "avg (quantile_over_time(0.5, {__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "50p",
@@ -1707,7 +1730,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max (quantile_over_time(0.6, power_level[$__rate_interval:10s]))",
+          "expr": "max (quantile_over_time(0.6, {__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "60p",
@@ -1720,7 +1743,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max (quantile_over_time(0.8, power_level[$__rate_interval:10s]))",
+          "expr": "max (quantile_over_time(0.8, {__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "80p",
@@ -1733,7 +1756,7 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max (max_over_time(power_level[$__rate_interval:10s]))",
+          "expr": "max (max_over_time({__name__=~\"surveyor_downstream_power_dbmv|power_level\",modulation!=\"Unknown\"}[$__rate_interval:10s]))",
           "hide": false,
           "instant": false,
           "legendFormat": "100p",
@@ -1834,15 +1857,723 @@
             "uid": "cfdkjn0i586ioa"
           },
           "editorMode": "code",
-          "expr": "max by (channel_id) (frequency)",
+          "expr": "max by (channel_id) (surveyor_downstream_frequency_hertz)",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "ch {{channel_id}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "max by (channel_id) (frequency)",
+          "instant": false,
+          "legendFormat": "ch {{channel_id}} (before 9/29)",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "frequency",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Whether surveyor's most recent modem poll succeeded.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "down"
+                },
+                "1": {
+                  "text": "up"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 66
+      },
+      "id": 70,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "surveyor_modem_up",
+          "instant": false,
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "modem",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Polls run every 30s and back off to 5m while failing. Channel metrics stop after 90s without a success.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 90
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 66
+      },
+      "id": 71,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "time() - surveyor_last_success_timestamp_seconds",
+          "instant": false,
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "last successful poll",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "login: modem rejected the password. fetch: timeout or connection error. parse: unexpected response.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 66
+      },
+      "id": 72,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "sum by (stage) (increase(surveyor_poll_errors_total[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "{{stage}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "poll errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Dashed lines mark -7 and +7 dBmV, the usual healthy range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": -7
+              },
+              {
+                "color": "red",
+                "value": 7
+              }
+            ]
+          },
+          "unit": "dBmV"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 66
+      },
+      "id": 73,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "max by (frequency_mhz) (surveyor_downstream_power_dbmv)",
+          "instant": false,
+          "legendFormat": "{{frequency_mhz}} MHz",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "downstream power by channel",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Dashed line marks 33 dB; QAM256 wants at least that.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 33
+              }
+            ]
+          },
+          "unit": "dB"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 74
+      },
+      "id": 74,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "max by (frequency_mhz) (surveyor_downstream_snr_db)",
+          "instant": false,
+          "legendFormat": "{{frequency_mhz}} MHz",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "downstream SNR by channel",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Modem transmit power. Dashed lines mark 35 and 51 dBmV; near the top means the modem is shouting to be heard.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 35
+              },
+              {
+                "color": "red",
+                "value": 51
+              }
+            ]
+          },
+          "unit": "dBmV"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 74
+      },
+      "id": 75,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "max by (frequency_mhz) (surveyor_upstream_power_dbmv)",
+          "instant": false,
+          "legendFormat": "{{frequency_mhz}} MHz",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "upstream power by channel",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Downstream channels that are unlocked or report modulation Unknown.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 16,
+        "y": 74
+      },
+      "id": 76,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "count(surveyor_downstream_locked{modulation=\"Unknown\"} or surveyor_downstream_locked == 0) or vector(0)",
+          "instant": false,
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "unusable downstream channels",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "cfdkjn0i586ioa"
+      },
+      "description": "Modem firmware. The ISP pushes updates without notice, and they can change channel lineups.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 74
+      },
+      "id": 77,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "cfdkjn0i586ioa"
+          },
+          "editorMode": "code",
+          "expr": "surveyor_modem_info",
+          "instant": false,
+          "legendFormat": "{{firmware}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "firmware",
+      "type": "stat"
     },
     {
       "collapsed": false,
@@ -1850,7 +2581,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 82
       },
       "id": 58,
       "panels": [],
@@ -1923,7 +2654,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 67
+        "y": 83
       },
       "id": 59,
       "options": {
@@ -2032,7 +2763,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 67
+        "y": 83
       },
       "id": 61,
       "options": {
@@ -2127,7 +2858,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 75
+        "y": 91
       },
       "id": 57,
       "options": {
@@ -2233,7 +2964,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 75
+        "y": 91
       },
       "id": 62,
       "options": {
@@ -2327,7 +3058,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 75
+        "y": 91
       },
       "id": 60,
       "options": {
