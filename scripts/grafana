@@ -6,7 +6,6 @@
 #   scripts/grafana get <uid> [outfile]     fetch a dashboard; writes JSON to stdout or outfile
 #   scripts/grafana save <file> [--label L] save a dashboard back (overwrite: true)
 #   scripts/grafana panels <uid>            print panel titles, types, and PromQL targets
-#   scripts/grafana export [dir]            write every dashboard to dir/<uid>.json (default: dashboards/)
 #   scripts/grafana api <path> [curl args]  raw API call, e.g. api /api/health
 #
 # Override the endpoint or credentials with GRAFANA_URL / GRAFANA_AUTH.
@@ -91,27 +90,6 @@ print("saved {} version {} -> {}".format(uid, ver, url))
 '
 }
 
-# Writes the bare dashboard object with id and version stripped, since both
-# change on every save and would make each export a noisy diff. `save` accepts
-# the result as is, so a checked-in file doubles as a rollback.
-cmd_export() {
-  local dir="${1:-$(cd "$(dirname "$0")/.." && pwd)/dashboards}"
-  mkdir -p "$dir"
-  local uid title
-  while IFS="$(printf '\t')" read -r uid title; do
-    api "/api/dashboards/uid/$uid" | python3 -c '
-import json, sys
-db = json.load(sys.stdin)["dashboard"]
-db.pop("id", None)
-db.pop("version", None)
-with open(sys.argv[1], "w") as f:
-    json.dump(db, f, indent=2, sort_keys=True)
-    f.write("\n")
-' "$dir/$uid.json"
-    printf 'wrote %s (%s)\n' "$dir/$uid.json" "$title"
-  done < <(cmd_list)
-}
-
 cmd_panels() {
   local uid="${1:-}"
   [ -n "$uid" ] || die "panels requires a dashboard uid"
@@ -147,7 +125,6 @@ case "${1:-}" in
   get)    shift; cmd_get "$@" ;;
   save)   shift; cmd_save "$@" ;;
   panels) shift; cmd_panels "$@" ;;
-  export) shift; cmd_export "$@" ;;
   api)    shift; cmd_api "$@" ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command: $1 (try --help)" ;;

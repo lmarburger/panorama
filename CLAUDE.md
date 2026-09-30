@@ -112,7 +112,6 @@ scripts/grafana list                   # dashboards: uid + title
 scripts/grafana get <uid> [outfile]    # fetch dashboard JSON
 scripts/grafana save <file> [--label]  # save back (overwrite: true)
 scripts/grafana panels <uid>           # panel titles, types, and PromQL exprs
-scripts/grafana export [dir]           # write every dashboard to dashboards/<uid>.json
 scripts/grafana api <path> [curl args] # raw call, e.g. api /api/health
 
 scripts/prom query '<promql>'          # instant query
@@ -161,7 +160,7 @@ The credential is in a public repo on purpose. Grafana is bound to loopback and 
 | Smokeping | `adgn11db97ym8b` |
 | System | `ad9scbj` |
 
-Dashboards are checked in under `dashboards/`. After changing one in the UI or with `save`, run `scripts/grafana export` and commit the diff. To roll back, `scripts/grafana save dashboards/<uid>.json` from the commit you want.
+Dashboards live in Grafana, which keeps their version history (dashboard settings, then Versions). They are deliberately not checked in to git, so edit them in the UI or with `scripts/grafana save`, and roll back from Grafana's version list.
 
 ## Metrics Reference
 
