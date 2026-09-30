@@ -7,6 +7,13 @@
 #   scripts/grafana save <file> [--label L] save a dashboard back (overwrite: true)
 #   scripts/grafana panels <uid>            print panel titles, types, and PromQL targets
 #   scripts/grafana api <path> [curl args]  raw API call, e.g. api /api/health
+#   scripts/grafana sync-cloud [--dry-run]  mirror every local dashboard to Grafana Cloud
+#
+# sync-cloud treats local as the source of truth. It overwrites each cloud
+# dashboard with the local copy, repoints Prometheus queries at the cloud
+# stack's built-in data source, and deletes cloud dashboards it synced before
+# that no longer exist locally. Needs GRAFANA_CLOUD_URL and
+# GRAFANA_CLOUD_API_TOKEN (a service account token, Editor role) in .env.
 #
 # Override the endpoint or credentials with GRAFANA_URL / GRAFANA_AUTH.
 #
@@ -113,6 +120,129 @@ walk(db.get("panels") or [])
 '
 }
 
+cmd_sync_cloud() {
+  [ -n "${GRAFANA_CLOUD_URL:-}" ] || die "sync-cloud needs GRAFANA_CLOUD_URL in .env"
+  [ -n "${GRAFANA_CLOUD_API_TOKEN:-}" ] || die "sync-cloud needs GRAFANA_CLOUD_API_TOKEN in .env"
+  LOCAL_URL="$GRAFANA_URL" LOCAL_AUTH="$GRAFANA_AUTH" \
+  CLOUD_URL="${GRAFANA_CLOUD_URL%/}" CLOUD_TOKEN="$GRAFANA_CLOUD_API_TOKEN" \
+  python3 - "$@" <<'PY'
+import base64, copy, json, os, sys, urllib.error, urllib.request
+
+dry_run = "--dry-run" in sys.argv[1:]
+# Marks the cloud dashboards this command owns. Grafana Cloud ships its own
+# dashboards (IRM plugins drop some into General), and only tagged ones are
+# ever deleted.
+SYNC_TAG = "panorama-sync"
+unknown = [a for a in sys.argv[1:] if a != "--dry-run"]
+if unknown:
+    sys.exit("grafana: unknown option: " + unknown[0])
+
+local_auth = "Basic " + base64.b64encode(os.environ["LOCAL_AUTH"].encode()).decode()
+cloud_auth = "Bearer " + os.environ["CLOUD_TOKEN"]
+
+
+def call(base, auth, path, method="GET", body=None, missing_ok=False):
+    req = urllib.request.Request(base + path, method=method, headers={
+        "Authorization": auth, "Content-Type": "application/json", "Accept": "application/json"})
+    if body is not None:
+        req.data = json.dumps(body).encode()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        if missing_ok and e.code == 404:
+            return None
+        sys.exit("grafana: {} {}{} -> HTTP {}: {}".format(method, base, path, e.code, e.read().decode()[:300]))
+    return json.loads(raw) if raw else None
+
+
+def local(path):
+    return call(os.environ["LOCAL_URL"], local_auth, path)
+
+
+# Look things up by uid rather than through /api/folders or /api/search: on
+# Grafana Cloud those lists lag a few seconds behind writes.
+def cloud(path, method="GET", body=None, missing_ok=False):
+    return call(os.environ["CLOUD_URL"], cloud_auth, path, method, body, missing_ok)
+
+
+local_ds = {d["uid"] for d in local("/api/datasources") if d["type"] == "prometheus"}
+# Every Grafana Cloud stack provisions its own metrics data source as
+# grafanacloud-<stack>-prom, next to other Prometheus-typed ones (usage, ML),
+# so match on the name.
+cloud_ds = [d for d in cloud("/api/datasources")
+            if d["type"] == "prometheus" and d["name"].startswith("grafanacloud-") and d["name"].endswith("-prom")]
+if len(cloud_ds) != 1:
+    sys.exit("grafana: expected one grafanacloud-*-prom data source, found: {}".format([d["name"] for d in cloud_ds]))
+target = {"type": "prometheus", "uid": cloud_ds[0]["uid"]}
+
+
+def repoint(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "datasource":
+                if isinstance(v, dict) and (v.get("uid") in local_ds or v.get("type") == "prometheus"):
+                    node[k] = dict(target)
+                elif isinstance(v, str) and v not in ("-- Grafana --", "-- Mixed --", "-- Dashboard --"):
+                    node[k] = dict(target)
+                else:
+                    repoint(v)
+            else:
+                repoint(v)
+    elif isinstance(node, list):
+        for v in node:
+            repoint(v)
+
+
+def comparable(dash):
+    d = copy.deepcopy(dash)
+    for k in ("id", "version"):
+        d.pop(k, None)
+    return d
+
+
+local_folders = {f["uid"]: f["title"] for f in local("/api/folders")}
+for uid, title in sorted(local_folders.items()):
+    existing = cloud("/api/folders/" + uid, missing_ok=True)
+    if not existing:
+        print("create folder  {}".format(title))
+        if not dry_run:
+            cloud("/api/folders", "POST", {"uid": uid, "title": title})
+    elif existing["title"] != title:
+        print("rename folder  {} -> {}".format(existing["title"], title))
+        if not dry_run:
+            cloud("/api/folders/" + uid, "PUT", {"title": title, "overwrite": True})
+
+local_uids = set()
+for hit in local("/api/search?type=dash-db&limit=5000"):
+    doc = local("/api/dashboards/uid/" + hit["uid"])
+    dash, folder = doc["dashboard"], doc["meta"].get("folderUid", "")
+    local_uids.add(dash["uid"])
+    repoint(dash)
+    dash["tags"] = sorted(set(dash.get("tags") or []) | {SYNC_TAG})
+    remote = cloud("/api/dashboards/uid/" + dash["uid"], missing_ok=True)
+    if remote and comparable(remote["dashboard"]) == comparable(dash) and remote["meta"].get("folderUid", "") == folder:
+        print("unchanged      {}".format(dash["title"]))
+        continue
+    print("{}  {} (local v{})".format("update        " if remote else "create        ", dash["title"], dash.get("version")))
+    if not dry_run:
+        dash.pop("id", None)
+        cloud("/api/dashboards/db", "POST", {
+            "dashboard": dash, "folderUid": folder, "overwrite": True,
+            "message": "synced from local v{}".format(dash.get("version"))})
+
+for hit in cloud("/api/search?type=dash-db&limit=5000&tag=" + SYNC_TAG):
+    if hit["uid"] in local_uids:
+        continue
+    print("delete         {} (not in local)".format(hit["title"]))
+    if not dry_run:
+        cloud("/api/dashboards/uid/" + hit["uid"], "DELETE")
+
+if dry_run:
+    print("dry run: nothing changed")
+PY
+}
+
 cmd_api() {
   local path="${1:-}"; shift || true
   [ -n "$path" ] || die "api requires a path, e.g. /api/health"
@@ -126,6 +256,7 @@ case "${1:-}" in
   save)   shift; cmd_save "$@" ;;
   panels) shift; cmd_panels "$@" ;;
   api)    shift; cmd_api "$@" ;;
+  sync-cloud) shift; cmd_sync_cloud "$@" ;;
   ""|-h|--help|help) usage ;;
   *) die "unknown command: $1 (try --help)" ;;
 esac

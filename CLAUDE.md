@@ -186,6 +186,8 @@ Blackbox probes are `probe_*` under jobs `icmp`, `tcp`, `dns`. Use `scripts/prom
 | `AMPLIFI_ROUTER_ADDR` | `http://192.168.119.1` | router URL |
 | `GRAFANA_ADMIN_PASSWORD` | `panorama` | admin password; also read by `scripts/grafana` |
 | `GRAFANA_LAN_IP` | `192.168.119.4` | the LAN address Grafana binds to |
+| `GRAFANA_CLOUD_URL` | none | Grafana Cloud stack URL (`https://<stack>.grafana.net`) for `scripts/grafana sync-cloud` |
+| `GRAFANA_CLOUD_API_TOKEN` | none | Grafana Cloud service account token (Editor) for `scripts/grafana sync-cloud` |
 | `GRAFANA_CLOUD_PROM_TOKEN` | none | Grafana Cloud access policy token (`metrics:write` only) for Prometheus `remote_write` |
 
 ## Grafana Cloud
@@ -195,6 +197,7 @@ Prometheus pushes a filtered copy of its data to a Grafana Cloud free-tier stack
 - Only jobs `icmp`, `tcp`, `dns`, `surveyor`, `geodesist` are sent (`write_relabel_configs` in `prometheus/prometheus.yml`). The free tier caps billable series at 10k, where a series scraped every 5s counts as 12. Those jobs come to about 4,900; `node` and `macos` alone would be about 30,000.
 - Grafana Cloud keeps 14 days. The local TSDB stays the long-term archive.
 - Prometheus cannot expand env vars in its config, so compose renders `GRAFANA_CLOUD_PROM_TOKEN` into a `configs` file mounted at `/etc/prometheus/grafana-cloud-token` and read via `password_file`. Changing the token or the `configs` block needs `scripts/stack up prometheus` (recreate), not a restart.
+- **Local Grafana is the source of truth for dashboards; the cloud copy is a mirror.** Edit locally, then `scripts/grafana sync-cloud` (try `--dry-run` first). It overwrites cloud dashboards, repoints every Prometheus data source reference at the stack's `grafanacloud-*-prom`, tags each copy `panorama-sync`, and deletes tagged cloud dashboards that are gone locally. Untagged ones (Grafana Cloud's own, including IRM dashboards in General) are never touched. Edits made in the cloud UI are lost on the next sync. Unchanged dashboards are skipped, so the cloud version history only grows on real changes. Grafana Cloud's list endpoints and permission grants lag writes by a few seconds, so the script looks things up by uid, and deleting a dashboard seconds after creating it can 403 once.
 - Prometheus does not scrape itself, so check delivery from its own endpoint: `docker exec prometheus wget -qO- localhost:9090/metrics | grep prometheus_remote_storage_samples`.
 
 ## Gotchas
