@@ -70,6 +70,9 @@ scrape_configs:
           - 8.8.4.4
           - 1.1.1.1
           - 1.0.0.1
+          # Comcast's own resolver, so lookups through the ISP's service are
+          # measured alongside the public ones.
+          - 75.75.75.75
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
