@@ -16,6 +16,7 @@
       "Bash(scripts/stack build:*)",
       "Bash(scripts/stack modem:*)",
       "Bash(scripts/setup)",
+      "Bash(scripts/stack restart prometheus)",
       "Bash(./scripts/stack ps:*)",
       "Bash(./scripts/stack health:*)",
       "Bash(./scripts/stack ports:*)",
@@ -26,6 +27,7 @@
       "Bash(./scripts/stack build:*)",
       "Bash(./scripts/stack modem:*)",
       "Bash(./scripts/setup)",
+      "Bash(./scripts/stack restart prometheus)",
 
       "Bash(go get:*)",
       "Bash(git status:*)",

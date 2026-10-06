@@ -136,7 +136,7 @@ scripts/setup [--apply]                # check/fix sibling checkouts, volumes, .
 
 **Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, that surveyor's last modem poll succeeded (`surveyor_modem_up`), and that geodesist emits real metrics. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
 
-`up`, `restart`, and `down` are deliberately **not** in the permission allowlist, since they interrupt collection. Everything else in `scripts/stack` runs unprompted.
+`up`, `restart`, and `down` are deliberately **not** in the permission allowlist, since they interrupt collection. The one exception is exactly `scripts/stack restart prometheus`, which every `prometheus.yml` edit needs and which only pauses scraping for a few seconds. Everything else in `scripts/stack` runs unprompted.
 
 `scripts/grafana --cloud list|get|panels|api|query` runs against Grafana Cloud with the token from `.env`, and `scripts/grafana query '<promql>'` queries through Grafana's Prometheus data source, so `--cloud query` shows what actually arrived. `save` refuses `--cloud`; use `sync-cloud`. Use these instead of hand-rolled `curl`, `docker exec`, or sourcing `.env`: the scripts are allowlisted and the one-off commands each need approval.
 
