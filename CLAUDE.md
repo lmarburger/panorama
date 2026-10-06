@@ -58,7 +58,7 @@ go test -v -cover ./...
 ```
 
 `go test` runs vet as part of the build, so a vet finding fails the run outright.
-`../geodesist` has no tests; verify it with `go build ./... && go vet ./...` plus
+`../geodesist` has one test, against a fake router; also confirm it is live with
 `scripts/prom query 'amplifi_clients_count'`.
 
 ### Code Quality
@@ -245,5 +245,6 @@ To move to a newer release, back up dashboards first (`scripts/grafana get <uid>
 - Always run tests before committing changes to surveyor
 - Tests use testify for assertions
 - Surveyor's tests include a fake TLS modem (`surveyor/client_test.go`) that reproduces the real login and session behavior, so they never need the actual modem
-- `geodesist` has **no tests at all**. Verify it with `go build ./... && go vet ./...`, and confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
+- `geodesist`'s only test (`geodesist/amplifi_test.go`) runs against a fake router covering login and session expiry; metric parsing is untested. Confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
+- The AmpliFi answers an expired or invalid session with **HTTP 200** and an HTML page redirecting to `login.php`, so geodesist has to check that the body is JSON, not just the status.
 - `go test` runs vet as part of the build, so a vet finding fails the test run rather than merely warning. Go 1.24 added the non-constant format string check, which is worth knowing when bumping the toolchain.
