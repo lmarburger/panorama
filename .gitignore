@@ -2,3 +2,4 @@
 .env
 .env.local
 backups/
+config/geodesist/names.json

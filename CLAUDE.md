@@ -60,8 +60,8 @@ go test -v -cover ./...
 ```
 
 `go test` runs vet as part of the build, so a vet finding fails the run outright.
-`../geodesist` has one test, against a fake router; also confirm it is live with
-`scripts/prom query 'amplifi_clients_count'`.
+`../geodesist` tests run against a fake router and a fake mDNS responder; also
+confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
 
 ### Code Quality
 ```bash
@@ -175,7 +175,7 @@ Dashboards live in Grafana, which keeps their version history (dashboard setting
 | Exporter | Metrics |
 |----------|---------|
 | surveyor (`job="surveyor"`) | `surveyor_downstream_{snr_db,power_dbmv,frequency_hertz,locked}`, `surveyor_downstream_{corrected,uncorrectable}_codewords_total`, `surveyor_upstream_{power_dbmv,frequency_hertz,symbol_rate,locked}`, labelled by `channel_id`, `frequency_mhz`, and `modulation` or `type`. Health: `surveyor_modem_up`, `surveyor_last_success_timestamp_seconds`, `surveyor_poll_errors_total{stage}`, `surveyor_poll_duration_seconds`, `surveyor_modem_info{firmware}` |
-| geodesist (`job="geodesist"`) | `amplifi_clients_count`, `amplifi_happiness_score`, `amplifi_signal_quality`, `amplifi_global_rx_bitrate`, `amplifi_global_tx_bitrate`, `amplifi_total_rx_bytes`, `amplifi_total_tx_bytes`. Per-host ones labelled by `host`. Health: `amplifi_router_up`, `amplifi_last_success_timestamp_seconds`, `amplifi_poll_errors_total` |
+| geodesist (`job="geodesist"`) | `amplifi_clients_count`, `amplifi_happiness_score`, `amplifi_signal_quality`, `amplifi_global_rx_bitrate`, `amplifi_global_tx_bitrate`, `amplifi_total_rx_bytes`, `amplifi_total_tx_bytes`. Per-host ones labelled by `host`. Health: `amplifi_router_up`, `amplifi_last_success_timestamp_seconds`, `amplifi_poll_errors_total`. Renaming: `amplifi_client_renames_total` |
 
 Surveyor's metrics were renamed on 2026-09-29. History before that is under the old unprefixed names (`snratio`, `power_level`, `frequency`, `correctable_count`, `uncorrectable_count`, `hmac_collect_duration_seconds`, labelled only by `channel_id`). The dashboard queries both, so the old half of each query can be deleted once that data ages out of the 2-year retention.
 
@@ -208,7 +208,18 @@ Prometheus pushes a filtered copy of its data to a Grafana Cloud free-tier stack
 - **Local Grafana is the source of truth for dashboards; the cloud copy is a mirror.** Edit locally, then `scripts/grafana sync-cloud` (try `--dry-run` first). It overwrites cloud dashboards, repoints every Prometheus data source reference at the stack's `grafanacloud-*-prom`, tags each copy `panorama-sync`, and deletes tagged cloud dashboards that are gone locally. Untagged ones (Grafana Cloud's own, including IRM dashboards in General) are never touched. Edits made in the cloud UI are lost on the next sync. Unchanged dashboards are skipped, so the cloud version history only grows on real changes. Grafana Cloud's list endpoints and permission grants lag writes by a few seconds, so the script looks things up by uid, and deleting a dashboard seconds after creating it can 403 once.
 - Prometheus does not scrape itself, so its remote write counters exist only on its own `/metrics`. `scripts/prom remote` reads them and totals billable series for the jobs the keep rule sends.
 
+## Geodesist Client Names
+
+The AmpliFi stores client names by MAC. The family's iPhones and iPads use rotating private Wi-Fi addresses, so they periodically reappear under a new MAC as `iPhone`, `iPad`, or unnamed (geodesist labels unnamed clients `unknown`). Changing the devices to a fixed private address was ruled out, so geodesist renames them instead: it asks each client for its mDNS hostname (which comes from the name set on the device and survives rotation) and renames the client in the router when the hostname is in `config/geodesist/names.json`. `../geodesist/README.md` has the details.
+
+- `config/geodesist/names.json` is gitignored because it holds family names; `names.example.json` shows the format. Claude can read and edit it. Geodesist reads it at startup, so an edit needs `scripts/stack restart geodesist`.
+- To add a device, find its hostname with `scripts/stack logs geodesist | grep announces`. A sleeping iPhone does not answer, so the line appears only once the phone has been unlocked on the network.
+- The router has no web API to forget a client. Its web UI exposes only rename, change icon, and static lease (`do=renamedevice`, `do=saveicon`, `do=savestaticlease` on `info-async.php`). Offline clients pile up in the AmpliFi iOS app and the web API does not even return them.
+- Geodesist exports only clients present at the last poll. Before 2026-10-14 it kept exporting every client it had ever seen with frozen values until restarted, and its byte counters were its own running totals of the router's 32-bit counters, which stick at 4294967295. They now pass the router's counters through, preferring the 64-bit field the router adds once the 32-bit one saturates.
+
 ## Gotchas
+
+- **Claude's shell cannot reach the home LAN directly.** Connections from the Mac to `192.168.119.0/24` fail with `No route to host`, even with the sandbox disabled (macOS Local Network permission). Containers can reach it, so for ad hoc router or device probing run the script in a throwaway container, e.g. `docker run --rm -v <dir>:/s:ro python:3.13-alpine python /s/script.py`. The router password is available as `docker exec geodesist printenv AMPLIFI_PASSWORD`; pass it through without printing it.
 
 - **The compose project name is pinned to `panorama` and the data volumes are pinned by name.** Do not remove either. Compose derives the project name from the directory by default and prefixes volume names with it, so moving or renaming the checkout would have silently reparented `surveyor_grafana` and `surveyor_prometheus` and started the stack against empty volumes. It looks exactly like losing 200+ days of history. The volumes are also declared `external`, so `docker compose down -v` cannot destroy them.
 
@@ -248,6 +259,6 @@ To move to a newer release, back up dashboards first (`scripts/grafana get <uid>
 - Always run tests before committing changes to surveyor
 - Tests use testify for assertions
 - Surveyor's tests include a fake TLS modem (`surveyor/client_test.go`) that reproduces the real login and session behavior, so they never need the actual modem
-- `geodesist`'s tests cover login and session expiry against a fake router (`geodesist/amplifi_test.go`) and the background poller (`geodesist/poller_test.go`); metric parsing is untested. Confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
+- `geodesist`'s tests cover login, session expiry, and renaming against a fake router (`geodesist/amplifi_test.go`), the background poller (`geodesist/poller_test.go`), parsing the checked-in router sample `info.json` (`geodesist/metrics_test.go`), and the namer plus mDNS lookup (`geodesist/namer_test.go`). Confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
 - The AmpliFi answers an expired or invalid session with **HTTP 200** and an HTML page redirecting to `login.php`, so geodesist has to check that the body is JSON, not just the status.
 - `go test` runs vet as part of the build, so a vet finding fails the test run rather than merely warning. Go 1.24 added the non-constant format string check, which is worth knowing when bumping the toolchain.

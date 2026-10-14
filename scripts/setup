@@ -78,6 +78,14 @@ else
 fi
 
 echo
+echo "geodesist client names"
+if [ -f config/geodesist/names.json ]; then
+  ok "config/geodesist/names.json present"
+else
+  printf '  \033[33moptional\033[0m config/geodesist/names.json    absent, so geodesist does not rename clients (see names.example.json)\n'
+fi
+
+echo
 if [ "$MISSING" -eq 0 ]; then
   printf '\033[32mready. next: scripts/stack up && scripts/stack health\033[0m\n'
 else
