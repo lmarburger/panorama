@@ -79,10 +79,6 @@ cmd_health() {
   echo "exporters emitting real metrics"
   # A bare `up` only proves /metrics answered. These confirm the exporters are
   # actually reaching the modem and the router.
-  exporter_metrics() {
-    docker exec prometheus wget -qO- "http://$1/metrics" 2>/dev/null \
-      | grep -v "^#" | grep -cv "^go_\|^promhttp_\|^process_" || true
-  }
   # Surveyor always emits its own health metrics, so counting lines would pass
   # even with the modem down. Its /metrics is served from a cached poll and
   # never touches the modem, so reading it here adds no modem load.
@@ -96,8 +92,18 @@ cmd_health() {
   else
     check 1 "surveyor: no surveyor_modem_up metric (is it running the current build?)"
   fi
-  n="$(exporter_metrics geodesist)"
-  if [ "${n:-0}" -gt 0 ]; then check 0 "geodesist: $n amplifi metrics"; else check 1 "geodesist: no amplifi metrics (check AMPLIFI_PASSWORD)"; fi
+  # Same reasoning as surveyor: geodesist serves a cached poll and always emits
+  # its own health metrics.
+  local geodesist
+  geodesist="$(docker exec prometheus wget -qO- http://geodesist/metrics 2>/dev/null || true)"
+  n="$(printf '%s\n' "$geodesist" | grep -c "^amplifi_" || true)"
+  if printf '%s\n' "$geodesist" | grep -q "^amplifi_router_up 1$"; then
+    check 0 "geodesist: router up, $n amplifi metrics"
+  elif printf '%s\n' "$geodesist" | grep -q "^amplifi_router_up 0$"; then
+    check 1 "geodesist: router poll failing (see scripts/stack logs geodesist; check AMPLIFI_PASSWORD)"
+  else
+    check 1 "geodesist: no amplifi_router_up metric (is it running the current build?)"
+  fi
 
   echo
   if [ "$FAILURES" -eq 0 ]; then

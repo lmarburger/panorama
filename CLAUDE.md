@@ -29,7 +29,9 @@ In sibling repos (see Repository Layout):
 - `../geodesist/`: Go-based Prometheus exporter for AmpliFi wifi usage metrics
 
 ### Surveyor Architecture
-Surveyor polls the modem in a background loop (every 30s, backing off to 5m while failing) and `/metrics` serves the latest result. **A scrape never touches the modem**, so reading surveyor's `/metrics` by hand is free. `../surveyor/CLAUDE.md` has the file layout and the modem quirks found by probing it.
+Surveyor polls the modem in a background loop (every 30s, and no slower while failing) and `/metrics` serves the latest result. **A scrape never touches the modem**, so reading surveyor's `/metrics` by hand is free. `../surveyor/CLAUDE.md` has the file layout and the modem quirks found by probing it.
+
+Geodesist works the same way against the router: a background poll every 5s, retried at most every 10s while failing. `up{job="geodesist"}` is therefore always 1; use `amplifi_router_up`.
 
 ## Development Commands
 
@@ -134,7 +136,7 @@ scripts/stack ps | logs | pull | build | up | restart | down
 scripts/setup [--apply]                # check/fix sibling checkouts, volumes, .env
 ```
 
-**Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, that surveyor's last modem poll succeeded (`surveyor_modem_up`), and that geodesist emits real metrics. A target being `up` just means `/metrics` answered; it does not mean surveyor reached the modem.
+**Run `scripts/stack health` after any change.** It checks container state, all 19 scrape targets, Grafana auth, that surveyor's last modem poll succeeded (`surveyor_modem_up`), and that geodesist's last router poll succeeded (`amplifi_router_up`). A target being `up` just means `/metrics` answered; it does not mean either service reached its device.
 
 `up`, `restart`, and `down` are deliberately **not** in the permission allowlist, since they interrupt collection. The one exception is exactly `scripts/stack restart prometheus`, which every `prometheus.yml` edit needs and which only pauses scraping for a few seconds. Everything else in `scripts/stack` runs unprompted.
 
@@ -173,7 +175,7 @@ Dashboards live in Grafana, which keeps their version history (dashboard setting
 | Exporter | Metrics |
 |----------|---------|
 | surveyor (`job="surveyor"`) | `surveyor_downstream_{snr_db,power_dbmv,frequency_hertz,locked}`, `surveyor_downstream_{corrected,uncorrectable}_codewords_total`, `surveyor_upstream_{power_dbmv,frequency_hertz,symbol_rate,locked}`, labelled by `channel_id`, `frequency_mhz`, and `modulation` or `type`. Health: `surveyor_modem_up`, `surveyor_last_success_timestamp_seconds`, `surveyor_poll_errors_total{stage}`, `surveyor_poll_duration_seconds`, `surveyor_modem_info{firmware}` |
-| geodesist (`job="geodesist"`) | `amplifi_clients_count`, `amplifi_happiness_score`, `amplifi_signal_quality`, `amplifi_global_rx_bitrate`, `amplifi_global_tx_bitrate`, `amplifi_total_rx_bytes`, `amplifi_total_tx_bytes`. Per-host ones labelled by `host` |
+| geodesist (`job="geodesist"`) | `amplifi_clients_count`, `amplifi_happiness_score`, `amplifi_signal_quality`, `amplifi_global_rx_bitrate`, `amplifi_global_tx_bitrate`, `amplifi_total_rx_bytes`, `amplifi_total_tx_bytes`. Per-host ones labelled by `host`. Health: `amplifi_router_up`, `amplifi_last_success_timestamp_seconds`, `amplifi_poll_errors_total` |
 
 Surveyor's metrics were renamed on 2026-09-29. History before that is under the old unprefixed names (`snratio`, `power_level`, `frequency`, `correctable_count`, `uncorrectable_count`, `hmac_collect_duration_seconds`, labelled only by `channel_id`). The dashboard queries both, so the old half of each query can be deleted once that data ages out of the 2-year retention.
 
@@ -245,6 +247,6 @@ To move to a newer release, back up dashboards first (`scripts/grafana get <uid>
 - Always run tests before committing changes to surveyor
 - Tests use testify for assertions
 - Surveyor's tests include a fake TLS modem (`surveyor/client_test.go`) that reproduces the real login and session behavior, so they never need the actual modem
-- `geodesist`'s only test (`geodesist/amplifi_test.go`) runs against a fake router covering login and session expiry; metric parsing is untested. Confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
+- `geodesist`'s tests cover login and session expiry against a fake router (`geodesist/amplifi_test.go`) and the background poller (`geodesist/poller_test.go`); metric parsing is untested. Confirm it is live with `scripts/prom query 'amplifi_clients_count'`.
 - The AmpliFi answers an expired or invalid session with **HTTP 200** and an HTML page redirecting to `login.php`, so geodesist has to check that the body is JSON, not just the status.
 - `go test` runs vet as part of the build, so a vet finding fails the test run rather than merely warning. Go 1.24 added the non-constant format string check, which is worth knowing when bumping the toolchain.
