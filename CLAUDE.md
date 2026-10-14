@@ -210,13 +210,12 @@ Prometheus pushes a filtered copy of its data to a Grafana Cloud free-tier stack
 
 ## Geodesist Client Names
 
-The AmpliFi stores client names by MAC. The family's iPhones and iPads use rotating private Wi-Fi addresses, so they periodically reappear under a new MAC as `iPhone`, `iPad`, or unnamed (geodesist labels unnamed clients `unknown`). Changing the devices to a fixed private address was ruled out, so geodesist renames them instead: on every poll it asks each client whose label is on the `generic` list in `config/geodesist/names.json` for its mDNS hostname (which comes from the name set on the device and survives rotation) and renames the client in the router when that hostname is in the file's `names` map. `../geodesist/README.md` has the details.
+The AmpliFi stores client names by MAC. The family's iPhones and iPads use rotating private Wi-Fi addresses, so they periodically reappear under a new MAC as `iPhone`, `iPad`, or unnamed (geodesist labels unnamed clients `unknown`). Changing the devices to a fixed private address was ruled out, so geodesist runs with `--rename`: every client with a private (locally administered) MAC is renamed in the router to the hostname it announces over mDNS, such as `Tricias-iPad`. That hostname comes from the name set on the device and survives rotation, so the name and the graph label stay the same across rotations. There is no config file. `../geodesist/README.md` has the details.
 
-- `generic` is deliberately a short list of defaults actually observed (`unknown`, `iPhone`, `iPad`). The user adds to it as new ones show up; named clients are never probed.
-- Measured on 2026-10-14 with a 2s probe: a locked iPhone answers mDNS for about 13 seconds after its screen wakes, or about 25 seconds after an unlock and lock, then goes silent. That is why generic clients are probed every poll.
-
-- `config/geodesist/names.json` is gitignored because it holds family names; `names.example.json` shows the format. Claude can read and edit it. Geodesist reads it at startup, so an edit needs `scripts/stack restart geodesist`.
-- To add a device, find its hostname with `scripts/stack logs geodesist | grep announces`. A sleeping iPhone does not answer, so the line appears only once someone wakes the phone while it has a generic label.
+- Hardware-MAC clients are never probed or renamed. Their router names never get lost, and the user wants to keep the custom ones (`Printer`, `Basement TV`).
+- The user chose hostname names (`Tricias-iPad`) over hand-picked ones (`Trish’s iPad`) so that nothing ever needs maintaining. Don't reintroduce a names mapping without asking.
+- Measured on 2026-10-14 with a 2s probe: a locked iPhone answers mDNS for about 13 seconds after its screen wakes, or about 25 seconds after an unlock and lock, then goes silent. That is why unconfirmed private-MAC clients are probed every poll. A phone that is never woken keeps its old name.
+- Renames are logged: `scripts/stack logs geodesist | grep renamed`.
 - The router has no web API to forget a client. Its web UI exposes only rename, change icon, and static lease (`do=renamedevice`, `do=saveicon`, `do=savestaticlease` on `info-async.php`). Offline clients pile up in the AmpliFi iOS app and the web API does not even return them.
 - Geodesist exports only clients present at the last poll. Before 2026-10-14 it kept exporting every client it had ever seen with frozen values until restarted, and its byte counters were its own running totals of the router's 32-bit counters, which stick at 4294967295. They now pass the router's counters through, preferring the 64-bit field the router adds once the 32-bit one saturates.
 

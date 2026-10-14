@@ -49,11 +49,7 @@ services:
     command:
       - "--addr=:80"
       - "--router=${AMPLIFI_ROUTER_ADDR:-http://192.168.119.1}"
-      - "--names=/etc/geodesist/names.json"
-    # A directory rather than a single-file mount: a missing names.json then
-    # just turns renaming off instead of Docker creating a directory in its place.
-    volumes:
-      - ./config/geodesist:/etc/geodesist:ro
+      - "--rename"
     expose:
       - 80
 
